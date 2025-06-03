@@ -8,8 +8,8 @@ t = linspace(0, T, fs*T);  % time vector
 
 % define bubble parameters
 R0 = 0.975e-6;             % equilibrium radius [m]
-chi = 1.0;                 % shell elasticity [N/m]
-A = 1.5e5;                 % acoustic pressure amplitude [Pa]
+chi = 0.55;                % shell elasticity [N/m]
+A = 2.5e5;                 % acoustic pressure amplitude [Pa]
 
 % call function to setup parameters
 params = setup_marmottant_params(R0, chi, A);
@@ -76,7 +76,7 @@ function params = setup_marmottant_params(R0, chi, A)
     params.sigma_water = 0.072;       % surface tension of water
     params.rho = 1000;                % liquid density
     params.mu = 0.001;                % liquid viscosity
-    params.mu_s = 15e-9;              % shell surface viscosity/dilatational viscosity 
+    params.mu_s = 7.2e-9;              % shell surface viscosity/dilatational viscosity 
     params.c = 1480;                  % speed of sound in liquid
     params.gamma = 1.095;             % polytropic exponent
     params.P0 = 1e5;                  % ambient pressure 
@@ -90,8 +90,8 @@ end
 function dYdt = marmottant_ode(t, Y, p)
     R = Y(1);
     Rdot = Y(2);
-    Pac = p.Pac(t);
-    Pg = p.P0 * (p.R0 / R)^(3 * p.gamma) * (1 - (3 * p.gamma * Rdot) / p.c);
+    Pac = p.Pac(t);         % acoustic driving pressure 
+    Pg = p.P0 * (p.R0 / R)^(3 * p.gamma) * (1 - (3 * p.gamma * Rdot) / p.c); % gas pressure inside bubble
     sigma = marmottant_surface_tension(R, p);
 
     Rddot = (Pg - p.P0 - 2 * sigma / R ...
