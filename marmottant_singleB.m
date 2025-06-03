@@ -1,4 +1,4 @@
-clear, clc
+clear, clc, close all;
 
 % marmottant model function for a single bubble
 % define simulation parameters
