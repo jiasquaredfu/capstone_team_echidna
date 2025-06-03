@@ -78,7 +78,7 @@ function params = setup_marmottant_params(R0, chi, A)
     params.gamma = 1.095;             % polytropic exponent
     params.P0 = 1e5;                  % ambient pressure 
 
-    f = 3e6;                          % frequency
+    f = 2.9e6;                          % frequency
     cycles = 8;                       % number of cycles
     params.Pac = @(t) A * sin(2*pi*f*t) .* (t < cycles / f);
 end
