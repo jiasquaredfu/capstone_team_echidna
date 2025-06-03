@@ -8,7 +8,7 @@ t = linspace(0, T, fs*T);  % time vector
 
 % define bubble parameters
 R0 = 0.975e-6;             % equilibrium radius [m]
-chi = 1.0;                 % shell elasticity [N/m]
+chi = 0.55;                 % shell elasticity [N/m]
 A = 1.5e5;                 % acoustic pressure amplitude [Pa]
 
 % call function to setup parameters
@@ -18,22 +18,18 @@ params = setup_marmottant_params(R0, chi, A);
 Y0 = [R0, 0]; 
 [~, Y] = ode45(@(t, Y) marmottant_ode(t, Y, params), t, Y0);
 
-
 % extract bubble dynamics
 R = Y(:, 1);
 
-fprintf('Min R: %.6f µm\\n', min(R)*1e6);
-fprintf('Max R: %.6f µm\\n', max(R)*1e6);
-fprintf('Amplitude: %.6f µm\\n', (max(R) - min(R))*1e6);
+fprintf('Min R: %.6f µm\n', min(R)*1e6);
+fprintf('Max R: %.6f µm\n', max(R)*1e6);
+fprintf('Amplitude: %.6f µm\n', (max(R) - min(R))*1e6);
 
 Rdot = Y(:, 2);
 Rddot = gradient(Rdot, t);
 
 % calculate PCD pressure signal
 P = params.rho * (R .* Rddot + 2 * Rdot.^2);
-
-% add small Gaussian noise
-P = P + 0.05 * max(abs(P)) * randn(size(P));
 
 % plot PCD pressure signal in time domain
 figure;
@@ -58,7 +54,7 @@ title('Driving Acoustic Pressure');
 
 % try to replicate figure 5b from paper
 figure;
-plot(t * 1e6, R * 1e6, 'k', 'LineWidth', 1.25);
+plot(t * 1e6, R * 1e6);
 xlabel('Time [\mus]', 'FontSize', 12);
 ylabel('Radius [\mum]', 'FontSize', 12);
 title('Radius Oscillation (Marmottant Model)', 'FontSize', 14);
