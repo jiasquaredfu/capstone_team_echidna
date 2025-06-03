@@ -63,6 +63,7 @@ xlabel('Time [\mus]', 'FontSize', 12);
 ylabel('Radius [\mum]', 'FontSize', 12);
 title('Radius Oscillation (Marmottant Model)', 'FontSize', 14);
 xlim([0, T * 1e6]); ylim([0.8, 1.05]);
+ylim([0.974985, 0.975015]);
 grid on; set(gca, 'FontSize', 12);
 
 
