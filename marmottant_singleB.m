@@ -9,7 +9,7 @@ t = linspace(0, T, fs*T);  % time vector
 % define bubble parameters
 R0 = 0.975e-6;             % equilibrium radius [m]
 chi = 1.0;                 % shell elasticity [N/m]
-A = 1.3e5;                 % acoustic pressure amplitude [Pa]
+A = 1.5e5;                 % acoustic pressure amplitude [Pa]
 
 % call function to setup parameters
 params = setup_marmottant_params(R0, chi, A);
@@ -49,6 +49,13 @@ pwelch(P, [], [], [], fs, 'power');
 title('FFT PCD Signal in Frequency Domain');
 xlabel('Frequency [Hz]');
 
+% plot and check if driving pulse is working
+figure;
+plot(t*1e6, params.Pac(t));
+xlabel('Time [μs]');
+ylabel('Pac(t) [Pa]');
+title('Driving Acoustic Pressure');
+
 % try to replicate figure 5b from paper
 figure;
 plot(t * 1e6, R * 1e6, 'k', 'LineWidth', 1.25);
@@ -84,7 +91,7 @@ function dYdt = marmottant_ode(t, Y, p)
     R = Y(1);
     Rdot = Y(2);
     Pac = p.Pac(t);
-    Pg = p.P0 * (p.R0 / R)^(3 * p.gamma) * (1 - 3 * Rdot / p.c);
+    Pg = p.P0 * (p.R0 / R)^(3 * p.gamma) * (1 - (3 * p.gamma * Rdot) / p.c);
     sigma = marmottant_surface_tension(R, p);
 
     Rddot = (Pg - p.P0 - 2 * sigma / R ...
@@ -104,7 +111,7 @@ function sigma = marmottant_surface_tension(R, p)
     if R <= Rb
         sigma = 0;
     elseif R <= Rrupture
-        sigma = p.chi * ((R^2 / Rb^2) - 1);
+        sigma = 2* p.chi * (R / Rb - 1);
     else
         sigma = p.sigma_water;
     end
