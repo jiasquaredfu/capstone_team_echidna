@@ -32,19 +32,13 @@ figure(1);
 plot(t * 1e6, P, 'o-');
 xlim([0, T * 1e6]);
 xlabel('Time [\mus]');
-ylabel('Pressure [a.u.]');
+ylabel('Pressure [Pa]');
 title('PCD Signal from Single Bubble in Time Domain');
 
-% use pwelch to apply FFT and plot in frequency-domain
-figure(2);
-pwelch(P, [], [], [], fs, 'power');
-%fft(P);
-title('FFT PCD Signal in Frequency Domain');
-xlabel('Frequency [Hz]');
 
 % try to replicate figure 5b from paper
 figure(3);
-plot(t * 1e6, R * 1e6, 'k', 'LineWidth', 1.25);
+plot(t * 1e6, R * 1e6, 'k', 'LineWidth', 1.25, color='blue');
 xlabel('Time [\mus]', 'FontSize', 12);
 ylabel('Radius [\mum]', 'FontSize', 12);
 title('Radius Oscillation (Marmottant Model)', 'FontSize', 14);
@@ -116,7 +110,7 @@ Fs = 500e6;
 y = fft(R);
 ly = length(y);
 f = (-ly/2:ly/2-1)/ly*Fs;
-figure(4)
+figure(2)
 plot(f,abs(y))
 xlim([0 2.5e8])
 title("Double-Sided Amplitude Spectrum of x(t)")
