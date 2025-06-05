@@ -41,6 +41,26 @@ pwelch(P, [], [], [], fs, 'power');
 %fft(P);
 title('FFT PCD Signal in Frequency Domain');
 xlabel('Frequency [Hz]');
+% FFT of PCD signal
+L = length(P);              % length of signal
+Yf = fft(P);                % compute FFT
+f = fs * (0:(L/2)) / L;     % (positive) frequency vector
+
+% get amplitude spectrum
+P_amp = abs(Yf / L); % divide FFT by L to normalize amplitude
+P_amp = P_amp(1:L/2+1); % take positive frequencies only
+% since we only take the first half of the frequencies
+P_amp(2:end-1) = 2 * P_amp(2:end-1);  % double remaining amplitudes except for 0Hz and fs/2
+
+% plot fft
+figure(2);
+% plot amplitude vs frequency
+plot(f / 1e6, P_amp, 'LineWidth', 1.25);  % convert frequency to MHz
+xlabel('Frequency [MHz]');
+ylabel('Amplitude [a.u.]');
+title('FFT of PCD Signal');
+grid on;
+xlim([0 75]);         
 
 % try to replicate figure 5b from paper
 figure(3);
@@ -123,3 +143,4 @@ title("Double-Sided Amplitude Spectrum of x(t)")
 xlabel("Frequency (Hz)")
 ylabel("|y|")
 grid
+end
