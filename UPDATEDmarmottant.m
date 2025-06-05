@@ -35,12 +35,6 @@ xlabel('Time [\mus]');
 ylabel('Pressure [a.u.]');
 title('PCD Signal from Single Bubble in Time Domain');
 
-% use pwelch to apply FFT and plot in frequency-domain
-figure(2);
-pwelch(P, [], [], [], fs, 'power');
-title('FFT PCD Signal in Frequency Domain');
-xlabel('Frequency [Hz]');
-
 % FFT of PCD signal
 L = length(P);              % length of signal
 Yf = fft(P);                % compute FFT
