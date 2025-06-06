@@ -104,14 +104,13 @@ function sigma = marmottant_surface_tension(R, p)
 end
 
 %% 
-Fs = 500e6;
 %Compute the Fourier transform of the signal. Plot the magnitude of the transform as a function of frequency.
 
 y = fft(R);
 ly = length(y);
-f = (-ly/2:ly/2-1)/ly*Fs;
+f_fft = (-ly/2:ly/2-1)/ly*fs;
 figure(2)
-plot(f,abs(y))
+plot(f_fft,y)
 xlim([0 2.5e8])
 title("Double-Sided Amplitude Spectrum of x(t)")
 xlabel("Frequency (Hz)")
