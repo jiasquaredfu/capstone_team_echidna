@@ -44,7 +44,7 @@ xlabel('Frequency [Hz]');
 
 % try to replicate figure 5b from paper
 figure(3);
-plot(t * 1e6, R * 1e6, 'k', 'LineWidth', 1.25);
+plot(t * 1e6, R * 1e6);
 xlabel('Time [\mus]', 'FontSize', 12);
 ylabel('Radius [\mum]', 'FontSize', 12);
 title('Radius Oscillation (Marmottant Model)', 'FontSize', 14);
