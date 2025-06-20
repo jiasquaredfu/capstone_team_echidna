@@ -84,18 +84,53 @@ plot        (vok_signal.time_vector, vok_signal.filtfilt(numerator, denominator)
 xlabel      ("Time [s]");
 ylabel      ("Amplitude [PA]");
 
+
 %% Frequency-Domain Analysis using fft()
 
 % --- Extract signal ---
 signal = vok_signal.time_series;  
 
-y = fft(signal);
-N = length(signal);
-f = (-N/2:N/2-1)/N*fs;
-y_shifted = fftshift(y);
+N = length(signal);           % number of samples
+y = fft(signal);              % compute FFT
+
+% --- Frequency vector (positive only) ---
+f = (0:N/2)*(fs/N);          
+
+% --- Normalize and compute one-sided amplitude spectrum ---
+P2 = abs(y/N);                % full amplitude spectrum
+P1 = P2(1:N/2+1);             % take only positive half
+P1(2:end-1) = 2*P1(2:end-1);
+
+% --- Plot ---
 figure;
-plot(f,abs(y_shifted))
+plot(f,P1)
 title('Vokurka fft graph')
 xlabel("Frequency (Hz)")
 ylabel("Amplitude [PA]")
 
+%%
+
+n_samples = 5000;      % Number of samples
+f0 = 1e6;              % Pure tone frequency (1 MHz)
+A = 1;                 % Amplitude
+
+% Time vector
+t = (0:n_samples-1)/fs;
+
+% Pure sine wave at 1 MHz
+signal = A * sin(2*pi*f0*t);
+
+N = length(signal);
+y = fft(signal);
+f = (0:N/2)*(fs/N);             % Frequency vector (positive side)
+P2 = abs(y/N);                  % Two-sided amplitude spectrum
+P1 = P2(1:N/2+1);               % One-sided spectrum
+P1(2:end-1) = 2*P1(2:end-1);    % Energy correction
+
+% Plot
+figure("Name", "FFT of Pure 1 MHz Tone", "Units", "inches", "Position", [4 4 8 4]);
+plot(f, P1);
+xlim([0 5e6]);  % Zoom in to see around 1 MHz
+xlabel("Frequency [Hz]");
+ylabel("|Y(f)|");
+title("FFT of Pure 1 MHz Sine Wave");
