@@ -60,14 +60,14 @@ fprintf('frequency step (df): %.2f MHz\n', reader.df_MHz);
 % check data dimensions
 fprintf('\n=== TIME SERIES DATA ===\n');
 if reader.n_bursts > 0 && ~isempty(reader.time_series_mV{1})
-    % get first burst data
+    % get first burst data for reference dimensions
     first_burst_data = reader.time_series_mV{1};
     
     % check if dimensions are 1 x N (single channel, time points)
     fprintf('first burst data dimensions: %d x %d\n', ...
         size(first_burst_data, 1), size(first_burst_data, 2));
     
-    % transpose (275000 x 1 should be 1 x 275000)
+    % transpose if needed
     if size(first_burst_data, 1) > size(first_burst_data, 2)
         fprintf('transposing data (single channel, time points)\n');
         first_burst_data = first_burst_data';
@@ -81,67 +81,154 @@ if reader.n_bursts > 0 && ~isempty(reader.time_series_mV{1})
     % create time vector in milliseconds
     time_ms = (0:size(first_burst_data, 2)-1) * reader.dt * 1000;
     
+    % collect all bursts into matrix (aggregate)
+    n_bursts = reader.n_bursts;
+    all_bursts_matrix = zeros(n_bursts, length(first_burst_data));
+    
+    for burst = 1:n_bursts
+        burst_data = reader.time_series_mV{burst};
+        if size(burst_data, 1) > size(burst_data, 2)
+            burst_data = burst_data';
+        end
+        all_bursts_matrix(burst, :) = burst_data;
+    end
+    
+    % calculate aggregated statistics
+    mean_signal = mean(all_bursts_matrix, 1);
+    std_signal = std(all_bursts_matrix, 0, 1);
+    median_signal = median(all_bursts_matrix, 1);
+    
+    fprintf('\naggregation statistics:\n');
+    fprintf('  averaging across %d bursts\n', n_bursts);
+    fprintf('  single channel (no spatial channels)\n');
+    
     % create plots (undocked)
     set(0, 'DefaultFigureWindowStyle', 'normal');
     
-    % fig 1: single burst time series
-    figure('Name', 'time series - first burst', 'Position', [50 50 900 600]);
+    % fig 1: aggregated time series analysis
+    figure('Name', 'aggregated time series analysis', 'Position', [50 50 1200 800]);
     
-    subplot(2, 2, 1);
-    plot(time_ms, first_burst_data);
-    title('first burst full signal');
+    % plot 1: mean signal ± std
+    subplot(2, 3, 1);
+    plot(time_ms, mean_signal, 'b-', 'LineWidth', 1.5);
+    hold on;
+    plot(time_ms, mean_signal + std_signal, 'r--', 'LineWidth', 0.5);
+    plot(time_ms, mean_signal - std_signal, 'r--', 'LineWidth', 0.5);
+    fill([time_ms, fliplr(time_ms)], ...
+         [mean_signal + std_signal, fliplr(mean_signal - std_signal)], ...
+         'r', 'FaceAlpha', 0.2, 'EdgeColor', 'none');
+    hold off;
+    title(sprintf('mean signal ± std (n=%d bursts)', n_bursts));
+    xlabel('time (ms)');
+    ylabel('amplitude (mV)');
+    grid on;
+    legend('mean', '±1 std', 'Location', 'best');
+    
+    % plot 2: first 5 ms detail
+    subplot(2, 3, 2);
+    plot(time_ms(1:min(5000, end)), mean_signal(1:min(5000, end)), 'b-', 'LineWidth', 1.5);
+    hold on;
+    fill([time_ms(1:min(5000, end)), fliplr(time_ms(1:min(5000, end)))], ...
+         [mean_signal(1:min(5000, end)) + std_signal(1:min(5000, end)), ...
+          fliplr(mean_signal(1:min(5000, end)) - std_signal(1:min(5000, end)))], ...
+         'r', 'FaceAlpha', 0.2, 'EdgeColor', 'none');
+    hold off;
+    title('first 5 ms detail');
     xlabel('time (ms)');
     ylabel('amplitude (mV)');
     grid on;
     
-    subplot(2, 2, 2);
-    plot(time_ms(1:min(5000, end)), first_burst_data(1:min(5000, end)));
-    title('first 5 ms in detail');
+    % plot 3: burst-to-burst variability heatmap
+    subplot(2, 3, 3);
+    imagesc(time_ms, 1:n_bursts, all_bursts_matrix);
+    title('burst heatmap (burst # vs time)');
     xlabel('time (ms)');
-    ylabel('amplitude (mV)');
-    grid on;
+    ylabel('burst number');
+    colorbar;
+    ylabel(colorbar, 'amplitude (mV)');
     
-    subplot(2, 2, 3);
-    histogram(first_burst_data, 100);
-    title('amplitude distribution');
+    % plot 4: amplitude distribution of aggregated signal
+    subplot(2, 3, 4);
+    histogram(mean_signal, 50);
+    title('amplitude distribution (mean signal)');
     xlabel('amplitude (mV)');
     ylabel('count');
     grid on;
     
-    subplot(2, 2, 4);
-    [pxx, f] = pwelch(first_burst_data, [], [], [], 1/reader.dt);
-    plot(f/1e6, 10*log10(pxx));
-    title('power spectrum');
+    % plot 5: power spectrum of mean signal
+    subplot(2, 3, 5);
+    [pxx_mean, f] = pwelch(mean_signal, [], [], [], 1/reader.dt);
+    plot(f/1e6, 10*log10(pxx_mean), 'b-', 'LineWidth', 1.5);
+    title('power spectrum (mean signal)');
     xlabel('frequency (MHz)');
     ylabel('power (dB)');
     grid on;
     xlim([0 10]);
     ylim([-100 0]);
     
-    % fig 2: commparing multiple bursts
-    figure('Name', 'multiple bursts', 'Position', [1000 50 900 400]);
+    % plot 6: burst statistics over time
+    subplot(2, 3, 6);
+    burst_peaks = max(abs(all_bursts_matrix), [], 2);
+    burst_rms = rms(all_bursts_matrix, 2);
     
-    num_bursts_plot = min(5, reader.n_bursts);
-    colors = lines(num_bursts_plot);
-    
+    plot((1:n_bursts)*reader.burst_period_ms/1000, burst_peaks, 'r-o', 'MarkerSize', 4);
     hold on;
-    for burst = 1:num_bursts_plot
-        burst_data = reader.time_series_mV{burst};
-        if size(burst_data, 1) > size(burst_data, 2)
-            burst_data = burst_data';
-        end
-        plot(time_ms(1:min(1000, end)), burst_data(1:min(1000, end)), ...
-            'Color', colors(burst, :), 'DisplayName', sprintf('burst %d', burst));
+    plot((1:n_bursts)*reader.burst_period_ms/1000, burst_rms, 'b-s', 'MarkerSize', 4);
+    hold off;
+    title('burst amplitude over experiment');
+    xlabel('experiment time (s)');
+    ylabel('amplitude (mV)');
+    legend('peak amplitude', 'RMS amplitude', 'Location', 'best');
+    grid on;
+    
+    % fig 2: burst comparsion
+    figure('Name', 'burst-to-burst comparison', 'Position', [1000 50 1200 600]);
+    
+    % select representative bursts
+    burst_indices = [1, round(n_bursts/4), round(n_bursts/2), round(3*n_bursts/4), n_bursts];
+    burst_indices = burst_indices(burst_indices <= n_bursts);
+    colors = lines(length(burst_indices));
+    
+    % plot 1: selected bursts overlaid
+    subplot(1, 2, 1);
+    hold on;
+    for i = 1:length(burst_indices)
+        burst_idx = burst_indices(i);
+        plot(time_ms(1:min(5000, end)), ...
+             all_bursts_matrix(burst_idx, 1:min(5000, end)), ...
+             'Color', colors(i, :), 'LineWidth', 1.5, ...
+             'DisplayName', sprintf('burst %d', burst_idx));
     end
     hold off;
-    
-    title('first 5 bursts (first 1 ms)');
+    title('selected bursts (first 5 ms)');
     xlabel('time (ms)');
     ylabel('amplitude (mV)');
     legend('show', 'Location', 'best');
     grid on;
     
-    % fig 3: frequency domain data with harmonic analysis
+    % plot 2: correlation between early and late bursts
+    subplot(1, 2, 2);
+    early_burst = all_bursts_matrix(1, :);
+    late_burst = all_bursts_matrix(end, :);
+    
+    plot(early_burst(1:min(5000, end)), late_burst(1:min(5000, end)), '.');
+    hold on;
+    plot([-100 100], [-100 100], 'r--', 'LineWidth', 1); % identity line
+    hold off;
+    title(sprintf('burst correlation: 1 vs %d', n_bursts));
+    xlabel('burst 1 amplitude (mV)');
+    ylabel(sprintf('burst %d amplitude (mV)', n_bursts));
+    grid on;
+    axis equal;
+    xlim([-100 100]);
+    ylim([-100 100]);
+    
+    % calculate correlation coefficient
+    corr_coeff = corrcoef(early_burst, late_burst);
+    text(-90, 80, sprintf('r = %.3f', corr_coeff(1,2)), ...
+         'FontSize', 12, 'FontWeight', 'bold');
+    
+    % fig 3: frequency domain with features labeled
     figure('Name', 'cavitation spectrum analysis', 'Position', [50 700 1200 500]);
     
     if ~isempty(reader.freq_spec_dB{1})
@@ -227,27 +314,36 @@ if reader.n_bursts > 0 && ~isempty(reader.time_series_mV{1})
         
     end
     
-    % signal analysis
-    fprintf('\n=== SIGNAL ANALYSIS ===\n');
+    % signal analysis using aggregated burst data
+    fprintf('\n=== AGGREGATED SIGNAL ANALYSIS ===\n');
     
-    % signal statistics
-    fprintf('signal statistics:\n');
-    fprintf('  mean: %.4f mV\n', mean(first_burst_data));
-    fprintf('  standard deviation: %.4f mV\n', std(first_burst_data));
-    fprintf('  peak-to-peak: %.4f mV\n', max(first_burst_data) - min(first_burst_data));
-    fprintf('  RMS: %.4f mV\n', rms(first_burst_data));
+    % signal statistics on mean signal
+    fprintf('mean signal statistics (aggregated across %d bursts):\n', n_bursts);
+    fprintf('  mean: %.4f mV\n', mean(mean_signal));
+    fprintf('  standard deviation: %.4f mV\n', std(mean_signal));
+    fprintf('  peak-to-peak: %.4f mV\n', max(mean_signal) - min(mean_signal));
+    fprintf('  RMS: %.4f mV\n', rms(mean_signal));
     
-    % find ultrasound pulse
-    [max_val, max_idx] = max(abs(first_burst_data));
+    % find ultrasound pulse in mean signal
+    [max_val, max_idx] = max(abs(mean_signal));
     fprintf('maximum amplitude: %.4f mV at %.3f ms\n', ...
-        first_burst_data(max_idx), time_ms(max_idx));
+        mean_signal(max_idx), time_ms(max_idx));
     
-    % calculate SNR (crude estimate)
-    noise_std = std(first_burst_data(1:round(0.1*length(first_burst_data))));
-    signal_std = std(first_burst_data);
+    % calculate SNR using aggregated signal
+    noise_std = std(mean_signal(1:round(0.1*length(mean_signal))));
+    signal_std = std(mean_signal);
     snr_estimate = 20*log10(signal_std/noise_std);
-    fprintf('estimated SNR: %.2f dB\n', snr_estimate);
+    fprintf('estimated SNR (aggregated): %.2f dB\n', snr_estimate);
+    
+    % burst-to-burst variability statistics
+    fprintf('\nburst-to-burst variability:\n');
+    fprintf('  peak amplitude mean ± std: %.2f ± %.2f mV\n', ...
+        mean(burst_peaks), std(burst_peaks));
+    fprintf('  RMS amplitude mean ± std: %.2f ± %.2f mV\n', ...
+        mean(burst_rms), std(burst_rms));
+    fprintf('  coefficient of variation (peak): %.2f%%\n', ...
+        100*std(burst_peaks)/mean(burst_peaks));
     
 else
-    fprintf('oop no time series data found.\n');
+    fprintf('no time series data found.\n');
 end
