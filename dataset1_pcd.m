@@ -48,27 +48,27 @@ fprintf('B length of table: %.2f \n', length(reader.B));
 %time t
 t = reader.Tstart + (0:length(reader.B)-1) * reader.Tinterval;
 
-%raw signal just to see
-fig = figure('Name','Raw Signals','NumberTitle','off','Position',[100 100 1000 600]);
-tgroup = uitabgroup(fig);
-
-% --- Tab 1: A signal ---
-tab1 = uitab(tgroup,'Title','A signal');
-ax1 = axes('Parent', tab1);
-plot(ax1, t, reader.A, 'b');
-title(ax1,'Raw A Signal')
-xlabel(ax1,'Time (s)')
-ylabel(ax1,'Amplitude')
-grid(ax1,'on')
-
-% --- Tab 2: B signal ---
-tab2 = uitab(tgroup,'Title','B signal');
-ax2 = axes('Parent', tab2);
-plot(ax2, t, reader.B, 'r');
-title(ax2,'Raw B Signal')
-xlabel(ax2,'Time (s)')
-ylabel(ax2,'Amplitude')
-grid(ax2,'on')
+% %raw signal just to see
+% fig = figure('Name','Raw Signals','NumberTitle','off','Position',[100 100 1000 600]);
+% tgroup = uitabgroup(fig);
+% 
+% % --- Tab 1: A signal ---
+% tab1 = uitab(tgroup,'Title','A signal');
+% ax1 = axes('Parent', tab1);
+% plot(ax1, t, reader.A, 'b');
+% title(ax1,'Raw A Signal')
+% xlabel(ax1,'Time (s)')
+% ylabel(ax1,'Amplitude')
+% grid(ax1,'on')
+% 
+% % --- Tab 2: B signal ---
+% tab2 = uitab(tgroup,'Title','B signal');
+% ax2 = axes('Parent', tab2);
+% plot(ax2, t, reader.B, 'r');
+% title(ax2,'Raw B Signal')
+% xlabel(ax2,'Time (s)')
+% ylabel(ax2,'Amplitude')
+% grid(ax2,'on')
 
 
 %% apply fft to data
@@ -100,83 +100,230 @@ fprintf('  peak-to-peak: %.4f mV\n', max(reader.B) - min(reader.B));
 fprintf('  RMS: %.4f mV\n', rms(reader.B));
 
 %% find harmonics and ultraharmonics
+% === Harmonic and Ultraharmonic Analysis using Welch Spectrum ===
+WelchSpec = sqrt(pxx);
+% Fundamental and harmonic setup
+drive_frequency = 0.5e6;   % f0
+n_harmonics = 4;           % f0, H1, H2, H3
+harmonic_freqs = drive_frequency * (1:n_harmonics);
 
-% number of points and sampling frequency
-N = length(reader.B);
-Fs = 1 / reader.Tinterval;
-
-Y = fft(reader.B);
-% two-sided spectrum magnitude
-P2 = abs(Y / N);
-%single-sides specturm magnitude
-P1 = P2(1:floor(N/2)+1);
-%frequency vector corresponding to P1
-f = Fs * (0:floor(N/2)) / N;
-%0.5 MHz fundamental
-drive_frequency = 0.5e6; 
-%number of harmonics we are looking for
-n_harmonics = 3;            
-%array of harmonics
-harmonic_freqs = drive_frequency * (1:n_harmonics); 
+% Harmonic detection (Welch-based)
 harmonic_indices = zeros(1, n_harmonics);
 for k = 1:n_harmonics
-    [~, idx] = min(abs(f - harmonic_freqs(k)));  
+    [~, idx] = min(abs(f - harmonic_freqs(k)));
     harmonic_indices(k) = idx;
 end
-harmonic_amplitudes = P1(harmonic_indices);
+harmonic_amplitudes = WelchSpec(harmonic_indices);
 
-% --- Ultraharmonics ---
-uh_multiples = 3:2:(2*n_harmonics+1); 
-ultraharmonic_freqs = uh_multiples * drive_frequency / 2;
+% Ultraharmonics: U1.5, U2.5, U3.5
+uh_orders = [1.5 2.5 3.5];
+ultraharmonic_freqs = uh_orders * drive_frequency;
 
-ultraharmonic_indices = zeros(1, length(ultraharmonic_freqs));
-ultraharmonic_amplitudes = zeros(1, length(ultraharmonic_freqs));
+ultraharmonic_indices = [];
+ultraharmonic_amplitudes = [];
 
-for k = 1:length(ultraharmonic_freqs)
-    [~, idx] = min(abs(f - ultraharmonic_freqs(k)));   
-    ultraharmonic_indices(k) = idx;
-    ultraharmonic_amplitudes(k) = P1(idx);         
+for k = 1:length(uh_orders)
+    % Skip if frequency is above Welch range
+    if ultraharmonic_freqs(k) > max(f)
+        warning('Ultraharmonic U%.1f above Nyquist – skipped', uh_orders(k));
+        continue
+    end
+
+    [~, idx] = min(abs(f - ultraharmonic_freqs(k)));
+
+    ultraharmonic_indices(end+1) = idx; %#ok<SAGROW>
+    ultraharmonic_amplitudes(end+1) = WelchSpec(idx);
 end
 
-%labeled fft graph
+% === Plot Welch Spectrum with Harmonics ===
 tab2 = uitab(tgroup,'Title','Harmonics labeled');
 ax2 = axes('Parent', tab2);
-plot(f / 1e6, 20*log10(P1));
-hold on
-plot(f(harmonic_indices) / 1e6, 20*log10(harmonic_amplitudes), 'ro', 'MarkerFaceColor','r');
-title(ax2,'FFT B signal with Harmonics')
-xlabel(ax2,'Frequency (MHz)')
-ylabel(ax2,' Magnitude (dB)')
-xlim([0 3])
-grid(ax1,'on')
 
-plot(f(ultraharmonic_indices)/1e6, 20*log10(ultraharmonic_amplitudes), 'go', 'MarkerFaceColor','g');
-label_offset = 0.05 * max(20*log10(P1));
+plot(ax2, f/1e6, 20*log10(WelchSpec));
+hold(ax2,'on')
 
-% Harmonics
+% Harmonic markers
+plot(ax2, f(harmonic_indices)/1e6, ...
+     20*log10(harmonic_amplitudes), ...
+     'ro', 'MarkerFaceColor','r');
+
+% Ultraharmonic markers
+plot(ax2, f(ultraharmonic_indices)/1e6, ...
+     20*log10(ultraharmonic_amplitudes), ...
+     'go', 'MarkerFaceColor','g');
+
+% Labels
+label_offset = 0.05 * max(20*log10(WelchSpec));
+
 for k = 1:n_harmonics
-    text(f(harmonic_indices(k))/1e6, 20*log10(harmonic_amplitudes(k)) + label_offset, ...
-        sprintf('H%d', k), 'Color', 'r', 'FontWeight','bold', 'HorizontalAlignment','center');
+    if k == 1
+        label = 'f0';
+    else
+        label = sprintf('H%d', k-1);
+    end
+    text(f(harmonic_indices(k))/1e6, ...
+         20*log10(harmonic_amplitudes(k)) + label_offset, ...
+         label, 'Color','r', 'FontWeight','bold', ...
+         'HorizontalAlignment','center');
 end
 
-% Ultraharmonics
+for k = 1:length(uh_orders)
+    text(f(ultraharmonic_indices(k))/1e6, ...
+         20*log10(ultraharmonic_amplitudes(k)) + label_offset, ...
+         sprintf('U%.1f', uh_orders(k)), ...
+         'Color','g', 'FontWeight','bold', ...
+         'HorizontalAlignment','center');
+end
+
+% Axes formatting
+title(ax2,'Welch Spectrum of B Signal with Harmonics')
+xlabel(ax2,'Frequency (MHz)')
+ylabel(ax2,'Magnitude (dB)')
+xlim(ax2,[0 3])
+grid(ax2,'on')
+
+%% Ultraharmonics bins
+uh_orders = [1.5 2.5 3.5];      % ultraharmonic orders
+drive_frequency = 0.5e6;        % fundamental frequency
+ultraharmonic_freqs = uh_orders * drive_frequency;
+
+% Set your search range in Hz (e.g., ±smth Hz around target)
+df = f(2) - f(1);
+% 1000 was arbitrary
+bin_range = 1000; 
+search_range = bin_range * df;  
+
+% Preallocate arrays
+ultraharmonic_indices = zeros(1, length(uh_orders));
+ultraharmonic_amplitudes = zeros(1, length(uh_orders));
+
+for k = 1:length(uh_orders)
+    f_target = ultraharmonic_freqs(k);
+    
+    % Define search window
+    idx_window = find(f >= f_target - search_range & f <= f_target + search_range);
+    
+    if isempty(idx_window)
+        warning('No points found in search range for U%.1f', uh_orders(k));
+        continue
+    end
+    
+    % Find max within window
+    [max_val, max_idx] = max(WelchSpec(idx_window));
+    
+    ultraharmonic_indices(k) = idx_window(max_idx);         % index of max
+    ultraharmonic_amplitudes(k) = max_val;                 % amplitude at max
+end
+
+%% Print the results
+fprintf('\n=== Ultraharmonics Peak Detection ===\n');
+for k = 1:length(uh_orders)
+    fprintf('U%.1f: Frequency = %.6f MHz, Amplitude = %.12f, Amplitude(dB) = %.2f dB\n', ...
+        uh_orders(k), f(ultraharmonic_indices(k))/1e6, ...
+        ultraharmonic_amplitudes(k), 20*log10(ultraharmonic_amplitudes(k)));
+end
+% === Plot PWELCH Spectrum with Harmonics and Ultraharmonics (markers only) ===
+tab3 = uitab(tgroup,'Title','Ultraharmonics with U bins');
+ax3 = axes('Parent', tab3);
+
+% Plot full PWELCH spectrum (thin line)
+plot(ax3, f/1e6, 20*log10(WelchSpec), 'b', 'LineWidth', 1, 'DisplayName','PWELCH');
+hold(ax3,'on');
+
+% Plot harmonics as markers only (red circles)
+plot(ax3, f(harmonic_indices)/1e6, 20*log10(harmonic_amplitudes), 'ro', ...
+     'MarkerFaceColor','r', 'MarkerSize',6, 'DisplayName','Harmonics');
+
+% Plot ultraharmonics as markers only (green triangles)
+plot(ax3, f(ultraharmonic_indices)/1e6, 20*log10(ultraharmonic_amplitudes), 'g^', ...
+     'MarkerFaceColor','g', 'MarkerSize',6, 'DisplayName','Ultraharmonics');
+
+% Add labels above peaks
+label_offset = 0.05 * max(20*log10(WelchSpec));
+
+for k = 1:n_harmonics
+    if k == 1
+        label = 'f0'; % fundamental
+    else
+        label = sprintf('H%d', k-1);
+    end
+    text(f(harmonic_indices(k))/1e6, ...
+         20*log10(harmonic_amplitudes(k)) + label_offset, ...
+         label, 'Color','r', 'FontWeight','bold', ...
+         'HorizontalAlignment','center');
+end
+
+fprintf('\n=== Harmonic Values (dB) ===\n');
+for k = 1:n_harmonics
+    if k == 1
+        label = 'f0';
+    else
+        label = sprintf('H%d', k-1);
+    end
+    % Convert amplitude to dB
+    amplitude_dB = 20*log10(harmonic_amplitudes(k));
+    
+    fprintf('%s: Frequency = %.3f MHz, Amplitude = %.2f dB\n', ...
+            label, f(harmonic_indices(k))/1e6, amplitude_dB);
+end
+
+
 for k = 1:length(ultraharmonic_indices)
-    text(f(ultraharmonic_indices(k))/1e6, 20*log10(ultraharmonic_amplitudes(k)) + label_offset, ...
-        sprintf('UH%.1f', uh_multiples(k)/2), 'Color', 'g', 'FontWeight','bold', 'HorizontalAlignment','center');
+    text(f(ultraharmonic_indices(k))/1e6, ...
+         20*log10(ultraharmonic_amplitudes(k)) + label_offset, ...
+         sprintf('U%.1f', uh_orders(k)), 'Color','g', 'FontWeight','bold', ...
+         'HorizontalAlignment','center');
 end
 
-% --- Harmonics ---
-harmonics_table = [harmonic_freqs(:), harmonic_indices(:), harmonic_amplitudes(:)];
-fprintf('\n  Harmonic Frequency (Hz)   FFT Index   Amplitude\n');
-for k = 1:size(harmonics_table,1)
-    fprintf('  %20.2f %15d %12.5f\n', harmonics_table(k,1), harmonics_table(k,2), harmonics_table(k,3));
+% Axes formatting
+title(ax3,'PWELCH + Harmonics + Ultraharmonics')
+xlabel(ax3,'Frequency (MHz)')
+ylabel(ax3,'Magnitude (dB)')
+xlim(ax3,[0 3])
+grid(ax3,'on')
+legend(ax3,'show')
+
+%% take the integral of harmonics & ultraharmonics to extract power which we want as the features
+% --- Frequency resolution ---
+df = f(2) - f(1);  % assuming uniform spacing
+
+% --- Define a small bin range around each harmonic ---
+
+fprintf('\n=== Total Harmonic Power (dB) ===\n');
+for k = 1:n_harmonics
+    if k == 1
+        label = 'f0';
+    else
+        label = sprintf('H%d', k-1);
+    end
+    
+    % Determine bin indices around the harmonic peak
+    startBin = max(1, harmonic_indices(k) - bin_range);
+    endBin   = min(length(pxx), harmonic_indices(k) + bin_range);
+    
+    % Integrate/sum the power under the harmonic
+    harmonic_power = sum(pxx(startBin:endBin)) * df;
+    
+    % Convert to dB
+    harmonic_power_dB = 10*log10(harmonic_power);  % use 10*log10 for power
+    
+    fprintf('%s: Frequency = %.3f MHz, Total power = %.14f mV^2, Total Power = %.2f dB\n', ...
+            label, f(harmonic_indices(k))/1e6, harmonic_power, harmonic_power_dB);
 end
 
-% --- Ultraharmonics ---
-ultraharmonics_table = [ultraharmonic_freqs(:), ultraharmonic_indices(:), ultraharmonic_amplitudes(:)];
-fprintf('\n  Ultraharmonic Frequency (Hz)   FFT Index   Amplitude\n');
-for k = 1:size(ultraharmonics_table,1)
-    fprintf('  %20.2f %15d %12.5f\n', ultraharmonics_table(k,1), ultraharmonics_table(k,2), ultraharmonics_table(k,3));
-end
 
-%% 
+fprintf('\n=== Ultraharmonic Total Power (dB) ===\n');
+for k = 1:length(ultraharmonic_indices)
+    % Determine bin indices around the ultraharmonic peak
+    startBin = max(1, ultraharmonic_indices(k) - bin_range);
+    endBin   = min(length(pxx), ultraharmonic_indices(k) + bin_range);
+    
+    % Integrate/sum the power under the ultraharmonic
+    ultraharmonic_power = sum(pxx(startBin:endBin)) * df;
+    
+    % Convert to dB
+    ultraharmonic_power_dB = 10*log10(ultraharmonic_power);
+    
+    fprintf('U%.1f: Frequency = %.3f MHz, Total Power = %.14f mv^2, Total Power = %.2f dB\n', ...
+            uh_orders(k), f(ultraharmonic_indices(k))/1e6, ultraharmonic_power, ultraharmonic_power_dB);
+end
