@@ -388,3 +388,77 @@ ylabel(ax4,'Magnitude (dB)')
 xlim(ax4,[0 6])   % adjust if needed
 grid(ax4,'on')
 legend(ax4,'show')
+
+%% Calculate Broadband Noise
+% Exclude regions around harmonics and ultraharmonics
+noise_exclusion_range = 2000;  % bins to exclude around each peak
+
+% Create mask for all frequency bins
+noise_mask = true(size(pxx));
+
+% Combine all peak indices
+all_peak_indices = [harmonic_indices, ultraharmonic_indices];
+
+% Exclude regions around each peak
+for k = 1:length(all_peak_indices)
+    startBin = max(1, all_peak_indices(k) - noise_exclusion_range);
+    endBin   = min(length(pxx), all_peak_indices(k) + noise_exclusion_range);
+    noise_mask(startBin:endBin) = false;
+end
+
+% Get noise bins (power spectral density values)
+noise_bins_psd = pxx(noise_mask);
+
+% Calculate power of each noise bin
+df = f(2) - f(1);  % frequency resolution
+noise_bins_power = noise_bins_psd * df;  % convert PSD to power for each bin
+
+% Take the average of the power values
+broadband_noise_avg_power = mean(noise_bins_power);
+broadband_noise_avg_power_dB = 10*log10(broadband_noise_avg_power);
+
+% Also calculate mean PSD (original method for comparison)
+broadband_noise_mean_psd = mean(noise_bins_psd);
+broadband_noise_mean_psd_dB = 10*log10(broadband_noise_mean_psd);
+
+fprintf('\n=== Broadband Noise ===\n');
+fprintf('Method 1 - Average Power per Bin:\n');
+fprintf('  Mean Power per Bin: %.12f mV^2\n', broadband_noise_avg_power);
+fprintf('  Mean Power per Bin (dB): %.2f dB\n', broadband_noise_avg_power_dB);
+fprintf('\nMethod 2 - Mean PSD:\n');
+fprintf('  Mean PSD: %.12f mV^2/Hz\n', broadband_noise_mean_psd);
+fprintf('  Mean PSD (dB): %.2f dB\n', broadband_noise_mean_psd_dB);
+fprintf('\nNumber of bins used for noise: %d / %d (%.1f%%)\n', ...
+        sum(noise_mask), length(pxx), 100*sum(noise_mask)/length(pxx));
+
+% Use the average power method as the primary metric
+broadband_noise_linear = broadband_noise_avg_power;
+broadband_noise_dB = broadband_noise_avg_power_dB;
+tab5 = uitab(tgroup,'Title','Broadband Noise Visualization');
+ax5 = axes('Parent', tab5);
+
+% Plot full spectrum
+plot(ax5, f/1e6, 10*log10(pxx), 'b', 'LineWidth', 1, 'DisplayName','Full Spectrum');
+hold(ax5,'on');
+
+% Highlight noise regions (used for calculation)
+noise_psd = pxx;
+noise_psd(~noise_mask) = NaN;  % Set excluded regions to NaN
+plot(ax5, f/1e6, 10*log10(noise_psd), 'g', 'LineWidth', 1.5, 'DisplayName','Noise Regions');
+
+% Plot noise floor level
+yline(ax5, broadband_noise_dB, 'r--', 'LineWidth', 2, 'DisplayName', ...
+      sprintf('Noise Floor: %.2f dB', broadband_noise_dB));
+
+% Mark excluded regions
+excluded_psd = pxx;
+excluded_psd(noise_mask) = NaN;
+plot(ax5, f/1e6, 10*log10(excluded_psd), 'Color', [0.8 0.8 0.8], ...
+     'LineWidth', 1, 'DisplayName','Excluded Peaks');
+
+title(ax5,'Broadband Noise Analysis')
+xlabel(ax5,'Frequency (MHz)')
+ylabel(ax5,'Power (dB)')
+xlim(ax5,[0 3])
+grid(ax5,'on')
+legend(ax5,'show', 'Location','best')
