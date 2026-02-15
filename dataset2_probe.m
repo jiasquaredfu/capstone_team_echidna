@@ -9,19 +9,254 @@ close all;
 
 
 % Add path of imaging function 
-function_path = '/Users/jiasquared/Desktop/CODING/capstone_team_echidna/04_Projects/';
+function_path = '/Users/jiasquared/Desktop/CODING/local_capstone_team_E/04_Projects/';
 addpath(function_path);
 
 % Add path of Philips-ATL L12-5 Probe Data to read 
-probe_path = '/Users/jiasquared/Desktop/CODING/capstone_team_echidna/1_and_2_2026-01-16_single_tube_sweep/probe';
+probe_path = '/Users/jiasquared/Desktop/CODING/local_capstone_team_E/1_and_2_2026-01-16_single_tube_sweep/probe';
 
 
-%% Extract processsed data for 1st datafile
+clean_data = extract_probe_data(probe_path, 1)
+fs = clean_data.fs
 
-%all_data(k).rf_data(:, :, frame_idx) = double(data.data{frame_idx});
+
+%% Conversion to frequency domain for middle channel frame 1 example 
+
+frame_1 = clean_data.rf_data(:, 64, 1); % middle channels frame 1 sample 
+[pxx, f] = pwelch(frame_1, [], [], [], fs);
+
+% convert to decibels for display
+pxx_db = 10*log10(pxx)
 
 
-function out = extract_probe_data(probe_path)
+%% Plot for middle channel frame 1 example 
+
+f0 = 0.5e6; 
+window_f = 0.3e6;
+window_uf = 0.05e6;  
+harmonics = 6:20; 
+
+% Processed Data Graph 
+figure;
+plot(f/1e6, pxx_db, 'LineWidth', 1.5);  % Freq
+hold on 
+xlabel('Frequency (MHz)');
+ylabel('Magnitude (dB)');
+title('Probe Data Frequency Domain Middle Channel Frame 1');
+xlim([0 10])  % 1.5x center frequency
+ylim([-65, -40])  % Capture noise floor to peak
+
+% Data with Harmonics and Ultraharmonics
+figure;
+plot(f/1e6, pxx_db, 'LineWidth', 1.5);  % Freq
+hold on 
+xlabel('Frequency (MHz)');
+ylabel('Magnitude (dB)');
+title('Probe Data Frequency Domain Middle Channel Frame 1');
+xlim([0 10])  % 1.5x center frequency
+ylim([-65, -40])  % Capture noise floor to peak
+
+
+for h = harmonics
+    target_f = h * f0;
+    h_idx_range = find(f >= target_f-window_f & f <= target_f+window_f);
+
+    [max_val, id_local] = max(pxx(h_idx_range));
+    peak_idx = h_idx_range(id_local);
+
+    plot(f(peak_idx)/1e6, pxx_db(peak_idx), ...
+         'ro', 'MarkerFaceColor','r')
+     text(f(peak_idx)/1e6, pxx_db(peak_idx)+3, ...
+         sprintf('H%d', h), ...
+         'HorizontalAlignment','center', ...
+         'FontWeight','bold');
+
+end
+
+
+for h = harmonics
+    target_f = (h+0.5) * f0;
+    u_idx_range = find(f >= target_f-window_uf & f <= target_f+window_uf);
+
+    [max_val, id_local] = max(pxx(u_idx_range));
+    peak_idx = u_idx_range(id_local);
+
+
+    plot(f(peak_idx)/1e6, pxx_db(peak_idx), ...
+         'go', 'MarkerFaceColor','g')
+     text(f(peak_idx)/1e6, pxx_db(peak_idx)+3, ...
+         sprintf('U%d', h), ...
+         'HorizontalAlignment','center', ...
+         'FontWeight','bold');
+
+end
+
+
+% Normalized Data with Harmonics and Ultraharmonics
+f_norm = f/f0
+figure;
+plot(f_norm, pxx_db, 'LineWidth', 1.5);  % Freq
+hold on 
+xlabel('Normalized Frequency');
+ylabel('Magnitude (dB)');
+title('Probe Data Frequency Domain Middle Channel Frame 1');
+xlim([0 20])  % 1.5x center frequency
+ylim([-65, -40])  % Capture noise floor to peak
+
+for h = harmonics
+    target_f = h * f0;
+    idx_range = find(f >= target_f-window_f & f <= target_f+window_f);
+
+    [max_val, id_local] = max(pxx(idx_range));
+    peak_idx = idx_range(id_local);
+
+    plot(f_norm(peak_idx), pxx_db(peak_idx), ...
+         'ro', 'MarkerFaceColor','r')
+     text(f_norm(peak_idx), pxx_db(peak_idx)+3, ...
+         sprintf('H%d', h), ...
+         'HorizontalAlignment','center', ...
+         'FontWeight','bold');
+
+end
+
+
+for h = harmonics
+    target_f = (h+0.5) * f0;
+    idx_range = find(f >= target_f-window_uf & f <= target_f+window_uf);
+
+    [max_val, id_local] = max(pxx(idx_range));
+    peak_idx = idx_range(id_local);
+
+    plot(f_norm(peak_idx), pxx_db(peak_idx), ...
+         'go', 'MarkerFaceColor','g')
+     text(f(peak_idx), pxx_db(peak_idx)+3, ...
+         sprintf('U%d', h), ...
+         'HorizontalAlignment','center', ...
+         'FontWeight','bold');
+
+end
+
+
+%% Get broadband noise 
+
+noise_exclusion_Hz = 0.05e6;  
+
+% Create mask for all frequency bins
+noise_mask = true(size(pxx));
+
+% Combine all harmonic and ultraharmonic target frequencies
+h_freqs = harmonics * f0;
+u_freqs = (harmonics + 0.5) * f0;
+all_peak_freqs = [h_freqs, u_freqs];
+
+% Exclude regions around each peak using frequency windows
+for k = 1:length(all_peak_freqs)
+    freq_center = all_peak_freqs(k);
+    noise_mask(f >= (freq_center - noise_exclusion_Hz) & f <= (freq_center + noise_exclusion_Hz)) = false;
+end
+
+% Extract PSD values in noise regions (mV^2/Hz)
+noise_psd_values = pxx(noise_mask);
+
+% Broadband noise (mean PSD)
+broadband_noise_mean_psd = mean(noise_psd_values);
+broadband_noise_mean_psd_dB = 10*log10(broadband_noise_mean_psd);
+
+
+figure;
+hold on;
+
+% Full spectrum (broadband)
+h_full = plot(f/1e6, 10*log10(pxx), 'b', 'LineWidth', 1.5, 'DisplayName','Broadband Spectrum');
+
+% Harmonics
+for h = harmonics
+    target_f = h * f0;
+    h_idx_range = find(f >= target_f-window_f & f <= target_f+window_f);
+    [~, id_local] = max(pxx(h_idx_range));
+    peak_idx = h_idx_range(id_local);
+
+    plot(f(peak_idx)/1e6, pxx_db(peak_idx), 'ro', 'MarkerFaceColor','r');  % no DisplayName
+    text(f(peak_idx)/1e6, pxx_db(peak_idx)+3, sprintf('H%d', h), ...
+        'HorizontalAlignment','center', 'FontWeight','bold');
+end
+
+% Ultraharmonics
+for h = harmonics
+    target_f = (h+0.5) * f0;
+    u_idx_range = find(f >= target_f-window_uf & f <= target_f+window_uf);
+    [~, id_local] = max(pxx(u_idx_range));
+    peak_idx = u_idx_range(id_local);
+
+    plot(f(peak_idx)/1e6, pxx_db(peak_idx), 'go', 'MarkerFaceColor','g');  % no DisplayName
+    text(f(peak_idx)/1e6, pxx_db(peak_idx)+3, sprintf('U%d', h), ...
+        'HorizontalAlignment','center', 'FontWeight','bold');
+end
+
+% Noise regions
+h_noise = plot(f(noise_mask)/1e6, 10*log10(pxx(noise_mask)), 'm', 'DisplayName','Noise Regions');
+
+% Labels and limits
+xlabel('Frequency (MHz)');
+ylabel('Magnitude (dB)');
+title('Probe Data Frequency Domain Middle Channel Frame 1');
+xlim([0 10]);
+ylim([-65 -40]);
+
+% Legend with only the desired two entries
+legend([h_full, h_noise]);
+%% Extract for all datafiles 
+
+data_files = dir(fullfile(probe_path, '*.pacq*'));
+
+all_features = [];  % struct array to store features
+channels = [1, 64, 128];  % first, middle, last channels
+
+% Process each data file
+for k = 1:length(data_files)
+    
+    % Extract RF data
+    clean_data = extract_probe_data(probe_path, k);
+    N_frames = size(clean_data.rf_data, 3);
+    
+    % Loop over selected channels
+    for ch = channels
+        % Loop over all frames
+        for frame_idx = 1:N_frames
+            frame = clean_data.rf_data(:, ch, frame_idx);  % single column vector
+            
+            % Compute PSD
+            [pxx, f] = pwelch(frame, [], [], [], clean_data.fs);
+            pxx_db = 10*log10(pxx);
+            
+            % Extract harmonic features
+            features = get_features(f, pxx, pxx_db, f0);
+            
+            
+            % Add metadata
+            features.filename = data_files(k).name;
+            features.channel = ch;
+            features.frame = frame_idx;
+            
+            % Append to results
+            all_features = [all_features; features];
+        end
+    end
+end
+
+% Convert struct array to table
+features_table = struct2table(all_features);
+
+% Save to CSV
+writetable(features_table, 'probe_data_all_frames.csv');
+
+disp('Feature extraction complete for all frames!');
+
+
+
+%% Functions 
+
+function out = extract_probe_data(probe_path, i)
  % Extracts and converts aquisition_reader data to double arrays
         %
         % Input: 
@@ -39,7 +274,7 @@ function out = extract_probe_data(probe_path)
         data_files = dir(fullfile(probe_path, '*.pacq*'));
 
         % Apply aquisition_reader function to get data 
-        file_path = string(fullfile(data_files(1).folder, data_files(1).name));
+        file_path = string(fullfile(data_files(i).folder, data_files(i).name));
         acq = imaging.common.acquisition_reader(file_path);
         disp(acq.data_params)
         disp(acq)
@@ -72,175 +307,67 @@ function out = extract_probe_data(probe_path)
         out.fs = fs;
 end
 
-clean_data = extract_probe_data(probe_path)
-fs = clean_data.fs
 
+function features = get_features(f, pxx, pxx_db, f0)
+    noise_exclusion_Hz = 0.05e6;  
+    harmonics = 6:20;
+    window_f = 0.3e6;
+    window_uf = 0.05e6;
 
-%% plot raw fs vs time 
+    features = struct();
 
-frame_1 = clean_data.rf_data(:, 64, 1); % middle channels frame 1 sample 
-%{
-n_samples = length(frame_1);
-t = (0:n_samples-1) / fs;   % seconds
+    % Harmonics
+    for h = harmonics
+        target_f = h * f0;
+        idx_range = find(f >= target_f-window_f & f <= target_f+window_f);
 
-figure;
-hold on 
-plot(t*1e6, frame_1, 'LineWidth', 1.2);  % Time in microseconds
-xlabel('Time (\mus)');
-ylabel('Amplitude');
-title('Raw RF Signal Middle Channel Frame 1');
-grid on;
-%}
+        if isempty(idx_range), continue; end
 
-%% Conversion to frequency domain 
+        [~, id_local] = max(pxx(idx_range));
+        peak_idx = idx_range(id_local);
 
-%nfft = 2^18;
-[pxx, f] = pwelch(frame_1, [], [], [], fs);
+        % calculate power from psd by taking integral 
+        features.(['H',num2str(h),'_freq']) = f(peak_idx);
+        features.(['H',num2str(h),'_power']) = trapz(f(idx_range), pxx(idx_range));
+        features.(['H',num2str(h),'_db']) = pxx_db(peak_idx);
+    end
 
-% average magnitude across channels
-      
-pxx_db = 10*log10(pxx)
+    % Ultra-harmonics
+    for h = harmonics
+        target_f = (h + 0.5) * f0;
+        idx_range = find(f >= target_f-window_uf & f <= target_f+window_uf);
 
-% average magnitude across frames for one channel 
-%mag_single_ch = mag2db(squeeze(X_single_ch)); 
+        if isempty(idx_range), continue; end
 
-% Plot 
-plot(f/1e6, pxx_db, 'LineWidth', 1.5);  % Freq
-hold on 
-xlabel('Frequency (MHz)');
-ylabel('Magnitude (dB)');
-title('Probe Data Frequency Domain Middle Channel Frame 1');
-xlim([0 14])  % 1.5x center frequency
-ylim([-65, -40])  % Capture noise floor to peak
-grid on;
+        [~, id_local] = max(pxx(idx_range));
+        peak_idx = idx_range(id_local);
 
+        features.(['U',num2str(h),'_freq']) = f(peak_idx);
+        features.(['U',num2str(h),'_power']) = trapz(f(idx_range), pxx(idx_range));
+        features.(['U',num2str(h),'_db']) = pxx_db(peak_idx);
+    end
 
-%{
-f0 = 0.5e6 % fundamental freq 
+        %Broad-band Noise 
+    
+        % Create mask for all frequency bins
+    noise_mask = true(size(pxx));
+    
+    % Combine all harmonic and ultraharmonic target frequencies
+    h_freqs = harmonics * f0;
+    u_freqs = (harmonics + 0.5) * f0;
+    all_peak_freqs = [h_freqs, u_freqs];
+    
+    % Exclude regions around each peak using frequency windows
+    for k = 1:length(all_peak_freqs)
+        freq_center = all_peak_freqs(k);
+        noise_mask(f >= (freq_center - noise_exclusion_Hz) & f <= (freq_center + noise_exclusion_Hz)) = false;
+    end
+    
+    % Extract PSD values in noise regions (mV^2/Hz)
+    noise_psd_values = pxx(noise_mask);
+    
+    % Store mean PSD and dB
+    features.broadband_noise_psd = mean(noise_psd_values);
+    features.broadband_noise_dB  = 10*log10(features.broadband_noise_psd);
 
-harmonics = 4:12; 
-
-for h = harmonics
-    h_freq = h * f0;
-    [~, idx] = min(abs(f - h_freq));    % closest frequency bin
-    plot(h_freq/1e6, pxx_db(idx), 'ro', 'MarkerSize', 10, 'MarkerFaceColor', 'r');
-    text(h_freq/1e6, pxx_db(idx)+5, sprintf('H%d', h), ...
-        'HorizontalAlignment', 'center', 'FontWeight', 'bold');
 end
-
-ultraharmonics = 4:12; 
-
-for u = ultraharmonics
-    u_freq = (u+0.5) * f0;
-    [~, idx] = min(abs(f - u_freq));    % closest frequency bin
-    plot(h_freq/1e6, pxx_db(idx), 'ro', 'MarkerSize', 10, 'MarkerFaceColor', 'g');
-    text(h_freq/1e6, pxx_db(idx)+5, sprintf('U%d', u), ...
-        'HorizontalAlignment', 'center', 'FontWeight', 'bold');
-end
-
-%}
-%{
-%% Extract for all datafiles 
-
-% Process each datafile
-for k = 1:length(data_files)
-    file_path = string(fullfile(data_files(k).folder, data_files(k).name));
-    data = imaging.common.acquisition_reader(file_path);
-    disp(data.data_params)
-end
-
-
-
-% Save metadata
-    all_data(k).filename = data_files(k).name;
-    all_data(k).title = data.acq_title;
-    all_data(k).timestamp = data.acq_timestamp;
-    all_data(k).n_frames = data.number_of_frames;
-    all_data(k).n_samples = data.rfdata_dimensions(1);
-    all_data(k).n_channels = data.rfdata_dimensions(2);
-    all_data(k).elapsed_time = data.elapsed_timevector;
-% Save data in 3D array
-    all_data(k).rf_data = zeros(data.rfdata_dimensions(1), ...
-                                  data.rfdata_dimensions(2), ...
-                                  data.number_of_frames);
-    disp(all_data)
-% Process each frame per file
-    %for frame_idx = 1:data.number_of_frames
-% Convert data from uint16 to double
-        %all_data(k).rf_data(:, :, frame_idx) = double(data.data{frame_idx});
-   % end
-end
-%save(fullfile(probe_path, 'processed_dataset2.mat'), 'all_data', '-v7.3');
-%fprintf('All data saved\n');
-
-
-file_idx = 1;  % First file
-channel = 64;  % Middle channel
-frame = 1;     % First frame
-
-
-% Get sampling frequency and create time vector
-fs = all_data(file_idx).fs;  % Sampling frequency in Hz
-n_samples = all_data(file_idx).n_samples;
-t = (0:n_samples-1) / fs;  % Time in seconds
-
-fprintf('=== Plotting Data ===\n');
-fprintf('File: %s\n', all_data(file_idx).filename);
-fprintf('Title: %s\n', all_data(file_idx).title);
-fprintf('Sampling frequency: %.2f MHz\n', fs/1e6);
-fprintf('Channel: %d, Frame: %d\n\n', channel, frame);
-
-
-rf_signal = all_data(file_idx).rf_data(:, channel, frame);
-
-% Time vector for one frame
-n_samples = acq_data.rfdata_dimensions(1);
-t = (0:n_samples-1) / fs;  % Time in seconds
-
-% Select middle channel and first frame
-channel = 64;
-frame = 1;
-rf_signal = double(acq_data.data{frame}(:, channel));
-
-% PLOT 1: Time domain signal (zoomed to see RF oscillations)
-figure('Position', [100 100 1400 800]);
-
-subplot(3,2,1);
-plot(t*1e6, rf_signal);  % Time in microseconds
-xlabel('Time (μs)');
-ylabel('Amplitude');
-title(sprintf('Full RF Signal - Channel %d, Frame %d', channel, frame));
-grid on;
-
-% Zoom into first 10 microseconds to see RF frequency
-subplot(3,2,2);
-zoom_samples = round(10e-6 * fs);  % First 10 microseconds
-plot(t(1:zoom_samples)*1e6, rf_signal(1:zoom_samples), 'LineWidth', 1.5);
-xlabel('Time (μs)');
-ylabel('Amplitude');
-title('Zoomed: First 10 μs (See RF Carrier Frequency)');
-grid on;
-
-
-
-
-% Example plots 
-figure('Name', sprintf('File %d: %s - Frame 1', k, data.acq_title));
-            
-            % Plot 1: RF data as an image
-            subplot(2,2,1);
-            imagesc(rf_data_double);
-            colorbar;
-            title(sprintf('RF Data - Frame 1\n%s', data.acq_title));
-            xlabel('Channel');
-            ylabel('Sample (time)');
-            
-            % Plot 2: Single channel signal
-            subplot(2,2,2);
-            plot(rf_data_double(:, 64)); % Plot channel 64 (middle channel)
-            title('Single Channel (64) RF Signal');
-            xlabel('Sample');
-            ylabel('Amplitude');
-            grid on;
-
-%}
