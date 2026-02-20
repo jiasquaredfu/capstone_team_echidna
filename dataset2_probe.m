@@ -1,7 +1,7 @@
 %% Dataset 2 Analysis 
 % Capstone II - Team E(Chidna)
 % JiaJia Fu 
-% 1/25/25
+% 2/17/26
 
 clear;
 clc;
@@ -164,10 +164,11 @@ broadband_noise_mean_psd_dB = 10*log10(broadband_noise_mean_psd);
 
 
 figure;
+set(gcf,'Position',[100 100 1800 1000])
 hold on;
 
 % Full spectrum (broadband)
-h_full = plot(f/1e6, 10*log10(pxx), 'b', 'LineWidth', 1.5, 'DisplayName','Broadband Spectrum');
+h_full = plot(f/1e6, 10*log10(pxx), 'Color', [0.5 0.5 0.5], 'LineWidth', 1.5, 'DisplayName','Broadband Spectrum');
 
 % Harmonics
 for h = harmonics
@@ -176,9 +177,9 @@ for h = harmonics
     [~, id_local] = max(pxx(h_idx_range));
     peak_idx = h_idx_range(id_local);
 
-    plot(f(peak_idx)/1e6, pxx_db(peak_idx), 'ro', 'MarkerFaceColor','r');  % no DisplayName
+    plot(f(peak_idx)/1e6, pxx_db(peak_idx), 'ro', 'MarkerFaceColor','r', 'MarkerSize',15);  % no DisplayName
     text(f(peak_idx)/1e6, pxx_db(peak_idx)+3, sprintf('H%d', h), ...
-        'HorizontalAlignment','center', 'FontWeight','bold');
+        'color','red', 'HorizontalAlignment','center', 'FontWeight','bold', 'FontSize', 18);
 end
 
 % Ultraharmonics
@@ -188,23 +189,25 @@ for h = harmonics
     [~, id_local] = max(pxx(u_idx_range));
     peak_idx = u_idx_range(id_local);
 
-    plot(f(peak_idx)/1e6, pxx_db(peak_idx), 'go', 'MarkerFaceColor','g');  % no DisplayName
+    plot(f(peak_idx)/1e6, pxx_db(peak_idx), 'go','color',[0 0.5 0], 'MarkerFaceColor','[0 0.5 0]', 'MarkerSize',15);  % no DisplayName
     text(f(peak_idx)/1e6, pxx_db(peak_idx)+3, sprintf('U%d', h), ...
-        'HorizontalAlignment','center', 'FontWeight','bold');
+        'color',[0 0.5 0],'HorizontalAlignment','center', 'FontWeight','bold', 'FontSize', 18);
 end
 
 % Noise regions
-h_noise = plot(f(noise_mask)/1e6, 10*log10(pxx(noise_mask)), 'm', 'DisplayName','Noise Regions');
+h_noise = plot(f(noise_mask)/1e6, 10*log10(pxx(noise_mask)), 'b','DisplayName','Noise Regions');
 
 % Labels and limits
-xlabel('Frequency (MHz)');
-ylabel('Magnitude (dB)');
-title('Probe Data Frequency Domain Middle Channel Frame 1');
-xlim([0 10]);
+xlabel('Normalized Frequency (f/f0)', 'FontSize', 30, 'FontWeight','bold');
+ylabel('Magnitude (dB)', 'FontSize', 30, 'FontWeight','bold');
+title('Probe Data Frequency Domain Middle Channel Frame 1', 'FontSize', 30);
+ax = gca; % Get current axes
+ax.FontSize = 16; 
+xlim([0 8]);
 ylim([-65 -40]);
 
 % Legend with only the desired two entries
-legend([h_full, h_noise]);
+legend([h_full, h_noise], 'FontSize', 20, 'FontWeight','bold');
 %% Extract for all datafiles 
 
 data_files = dir(fullfile(probe_path, '*.pacq*'));
