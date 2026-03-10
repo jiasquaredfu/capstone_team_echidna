@@ -389,11 +389,21 @@ xlim(ax4,[0 6])   % adjust if needed
 grid(ax4,'on')
 legend(ax4,'show')
 
-%% Calculate Broadband Noise
+%% Calculate Broadband Noise (restricted to 1.5f0 – 3f0)
+drive_frequency = 0.5e6;       % fundamental frequency (Hz)
+f_norm = f / drive_frequency;  % normalized frequency
+
+% Define noise frequency range
+noise_range_min = 1.5;  % 1.5 f0
+noise_range_max = 3.0;  % 3 f0
+
 % Exclude regions around harmonics and ultraharmonics
 noise_exclusion_range = 2000;  % bins to exclude around each peak
 
-% Create mask for all frequency bins
+% Create mask for frequency bins within 1.5f0 to 3f0
+freq_mask = (f_norm >= noise_range_min) & (f_norm <= noise_range_max);
+
+% Create mask for all frequency bins initially
 noise_mask = true(size(pxx));
 
 % Combine all peak indices
@@ -406,59 +416,155 @@ for k = 1:length(all_peak_indices)
     noise_mask(startBin:endBin) = false;
 end
 
+% Combine with frequency mask
+final_noise_mask = noise_mask & freq_mask;
+
 % Get noise bins (power spectral density values)
-noise_bins_psd = pxx(noise_mask);
+noise_bins_psd = pxx(final_noise_mask);
 
 % Calculate power of each noise bin
 df = f(2) - f(1);  % frequency resolution
-noise_bins_power = noise_bins_psd * df;  % convert PSD to power for each bin
+noise_bins_power = noise_bins_psd * df;  % convert PSD to power
 
 % Take the average of the power values
 broadband_noise_avg_power = mean(noise_bins_power);
 broadband_noise_avg_power_dB = 10*log10(broadband_noise_avg_power);
 
-% Also calculate mean PSD (original method for comparison)
-broadband_noise_mean_psd = mean(noise_bins_psd);
-broadband_noise_mean_psd_dB = 10*log10(broadband_noise_mean_psd);
+fprintf('\n=== Broadband Noise (1.5f0 – 3f0) ===\n');
+fprintf('Mean Power per Bin: %.12f mV^2\n', broadband_noise_avg_power);
+fprintf('Mean Power per Bin (dB): %.2f dB\n', broadband_noise_avg_power_dB);
+fprintf('Number of bins used for noise: %d / %d (%.1f%%)\n', ...
+        sum(final_noise_mask), length(pxx), 100*sum(final_noise_mask)/length(pxx));
 
-fprintf('\n=== Broadband Noise ===\n');
-fprintf('Method 1 - Average Power per Bin:\n');
-fprintf('  Mean Power per Bin: %.12f mV^2\n', broadband_noise_avg_power);
-fprintf('  Mean Power per Bin (dB): %.2f dB\n', broadband_noise_avg_power_dB);
-fprintf('\nMethod 2 - Mean PSD:\n');
-fprintf('  Mean PSD: %.12f mV^2/Hz\n', broadband_noise_mean_psd);
-fprintf('  Mean PSD (dB): %.2f dB\n', broadband_noise_mean_psd_dB);
-fprintf('\nNumber of bins used for noise: %d / %d (%.1f%%)\n', ...
-        sum(noise_mask), length(pxx), 100*sum(noise_mask)/length(pxx));
+%% Normalized Harmonics + Ultraharmonics + Broadband Noise (Standalone Figure)
+drive_frequency = 0.5e6;        
+f_norm = f / drive_frequency;   
+spectrum_dB = 10*log10(pxx);
 
-% Use the average power method as the primary metric
-broadband_noise_linear = broadband_noise_avg_power;
-broadband_noise_dB = broadband_noise_avg_power_dB;
-tab5 = uitab(tgroup,'Title','Broadband Noise Visualization');
-ax5 = axes('Parent', tab5);
+% --------------------------------------------------
+% Create New Figure
+% --------------------------------------------------
+figure('Color','w','Position',[200 200 900 600]);
+ax = axes;
+hold(ax,'on');
 
-% Plot full spectrum
-plot(ax5, f/1e6, 10*log10(pxx), 'b', 'LineWidth', 1, 'DisplayName','Full Spectrum');
-hold(ax5,'on');
+% --------------------------------------------------
+% 1. Plot Full Spectrum
+% --------------------------------------------------
+plot(ax, f_norm, spectrum_dB, ...
+     'Color', [0.75 0.75 0.75], ...
+     'LineWidth', 1.2, ...
+     'DisplayName','Full Acoustic Spectrum');
 
-% Highlight noise regions (used for calculation)
-noise_psd = pxx;
-noise_psd(~noise_mask) = NaN;  % Set excluded regions to NaN
-plot(ax5, f/1e6, 10*log10(noise_psd), 'g', 'LineWidth', 1.5, 'DisplayName','Noise Regions');
+% --------------------------------------------------
+% 2. Highlight Broadband Noise (1.5f0 – 3f0, excluding peaks)
+% --------------------------------------------------
+% Define normalized frequency range
+noise_range_min = 1.5;  
+noise_range_max = 3.0;  
 
-% Plot noise floor level
-yline(ax5, broadband_noise_dB, 'r--', 'LineWidth', 2, 'DisplayName', ...
-      sprintf('Noise Floor: %.2f dB', broadband_noise_dB));
+% Mask for frequency range
+freq_mask = (f_norm >= noise_range_min) & (f_norm <= noise_range_max);
 
-% Mark excluded regions
-excluded_psd = pxx;
-excluded_psd(noise_mask) = NaN;
-plot(ax5, f/1e6, 10*log10(excluded_psd), 'Color', [0.8 0.8 0.8], ...
-     'LineWidth', 1, 'DisplayName','Excluded Peaks');
+% Mask for excluded peaks around harmonics and ultraharmonics
+noise_exclusion_range = 2000;  % bins around peaks
+peak_mask = true(size(pxx));
+all_peak_indices = [harmonic_indices, ultraharmonic_indices];
 
-title(ax5,'Broadband Noise Analysis')
-xlabel(ax5,'Frequency (MHz)')
-ylabel(ax5,'Power (dB)')
-xlim(ax5,[0 3])
-grid(ax5,'on')
-legend(ax5,'show', 'Location','best')
+for k = 1:length(all_peak_indices)
+    startBin = max(1, all_peak_indices(k) - noise_exclusion_range);
+    endBin   = min(length(pxx), all_peak_indices(k) + noise_exclusion_range);
+    peak_mask(startBin:endBin) = false;
+end
+
+% Final noise mask
+final_noise_mask = freq_mask & peak_mask;
+
+% Prepare noise spectrum for plotting
+noise_spectrum = spectrum_dB;
+noise_spectrum(~final_noise_mask) = NaN;
+
+plot(ax, f_norm, noise_spectrum, ...
+     'b', 'LineWidth',2, ...
+     'DisplayName','Broadband Noise (1.5f0 – 3f0)');
+
+% Noise floor line
+yline(ax, broadband_noise_avg_power_dB, 'k--', ...
+      'LineWidth',2, ...
+      'DisplayName',sprintf('Broadband Noise Floor = %.2f dB', broadband_noise_avg_power_dB));
+
+% --------------------------------------------------
+% 3. Fundamental + Harmonics
+% --------------------------------------------------
+plot(ax, f_norm(harmonic_indices), ...
+     20*log10(harmonic_amplitudes), ...
+     'ro', ...
+     'MarkerFaceColor','r', ...
+     'MarkerSize',10, ...
+     'LineWidth',1.5, ...
+     'DisplayName','Fundamental (f_0) and Harmonics');
+
+% --------------------------------------------------
+% 4. Ultraharmonics (Dark Green)
+% --------------------------------------------------
+dark_green = [0 0.5 0];
+
+plot(ax, f_norm(ultraharmonic_indices), ...
+     20*log10(ultraharmonic_amplitudes), ...
+     '^', ...
+     'Color', dark_green, ...
+     'MarkerFaceColor', dark_green, ...
+     'MarkerSize',10, ...
+     'LineWidth',1.5, ...
+     'DisplayName','Ultraharmonics');
+
+% --------------------------------------------------
+% 5. Annotations
+% --------------------------------------------------
+label_offset = 0.06 * max(spectrum_dB);
+annotation_fontsize = 14;
+
+for k = 1:n_harmonics
+    if k == 1
+        label = 'f_0';
+    else
+        label = sprintf('H%d', k-1);
+    end
+    
+    text(f_norm(harmonic_indices(k)), ...
+         20*log10(harmonic_amplitudes(k)) + label_offset, ...
+         label, ...
+         'Color','r', ...
+         'FontWeight','bold', ...
+         'FontSize',annotation_fontsize, ...
+         'HorizontalAlignment','center');
+end
+
+for k = 1:length(uh_orders)
+    text(f_norm(ultraharmonic_indices(k)), ...
+         20*log10(ultraharmonic_amplitudes(k)) + label_offset, ...
+         sprintf('U%d', k), ...
+         'Color', dark_green, ...
+         'FontWeight','bold', ...
+         'FontSize',annotation_fontsize, ...
+         'HorizontalAlignment','center');
+end
+
+% --------------------------------------------------
+% Formatting: Title, Axis Labels, Legend
+% --------------------------------------------------
+title('Normalized Cavitation Spectrum Showing Harmonics, Ultraharmonics, and Broadband Noise (1.5f0–3f0)', ...
+      'FontSize',16,'FontWeight','bold')
+
+xlabel('Normalized Frequency  ( f / f_0 ) (MPa)', ...
+       'FontSize',15,'FontWeight','bold')
+
+ylabel('Acoustic Power Spectral Density (dB)', ...
+       'FontSize',15,'FontWeight','bold')
+
+set(ax,'FontSize',13,'LineWidth',1.5)
+xlim([0 6])
+grid on
+box on
+
+legend('Location','northeast','FontSize',12)
