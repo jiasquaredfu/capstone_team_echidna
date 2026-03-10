@@ -194,7 +194,21 @@ end
 
 function [noise_power, noise_power_dB, noise_percentage] = calculate_broadband_noise(pxx, f, harm_idx, uh_idx, params)
 % Calculate broadband noise by excluding regions around harmonics and ultraharmonics
+% Only considers frequency range between 1.5*f0 and 3*f0
 % Returns average power per bin in noise regions
+
+% Fundamental frequency (Hz)
+f0 = params.drive_frequency;  
+
+% Normalize frequency for convenience
+f_norm = f / f0;
+
+% Define broadband noise range
+noise_range_min = 1.5;  
+noise_range_max = 3.0;  
+
+% Mask for frequency range
+freq_mask = (f_norm >= noise_range_min) & (f_norm <= noise_range_max);
 
 % Create mask for all frequency bins (start with all bins included)
 noise_mask = true(size(pxx));
@@ -210,25 +224,30 @@ for k = 1:length(all_peak_idx)
     noise_mask(startBin:endBin) = false;
 end
 
+% Combine with frequency range mask
+final_noise_mask = noise_mask & freq_mask;
+
 % Get noise bins (power spectral density values)
-noise_bins_psd = pxx(noise_mask);
+noise_bins_psd = pxx(final_noise_mask);
 
 if ~isempty(noise_bins_psd)
-    % Calculate power of each noise bin
-    df = f(2) - f(1);  % frequency resolution
-    noise_bins_power = noise_bins_psd * df;  % convert PSD to power for each bin
+    % Frequency resolution
+    df = f(2) - f(1);  
+    
+    % Convert PSD to power for each bin
+    noise_bins_power = noise_bins_psd * df;  
     
     % Take the average of the power values
     noise_power = mean(noise_bins_power);
     noise_power_dB = 10*log10(noise_power);
     
     % Calculate percentage of spectrum used for noise
-    noise_percentage = 100 * sum(noise_mask) / length(pxx);
+    noise_percentage = 100 * sum(final_noise_mask) / length(pxx);
 else
     noise_power = NaN;
     noise_power_dB = NaN;
     noise_percentage = 0;
-    warning('No frequency bins available for noise calculation');
+    warning('No frequency bins available for noise calculation within 1.5f0–3f0');
 end
 
 end
