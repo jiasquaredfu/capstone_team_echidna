@@ -1,167 +1,155 @@
+%% PCD SHAP Analysis
+% training a model to predict broadband emission from harmonic features
+% SHAP shows which features push toward/away from broadband (inertial) events
+% positive SHAP = pushes toward inertial (unsafe)
+% negative SHAP = pushes toward safe
 clear; clc; close all;
-rng(42);  % fix random seed for reproducibility
+rng(42);
 
-% load features directly from extraction script output
 load('PCD_Features_AllFiles.mat', 'Results');
 
-% Build arrays from Results struct
-H_dB  = vertcat(Results.harmonic_power_dB);        % N x 4 (f0, H1, H2, H3)
+% build arrays
+H_dB  = vertcat(Results.harmonic_power_dB);        % N x 4
 U_dB  = vertcat(Results.ultraharmonic_power_dB);   % N x 3
 BB_dB = [Results.broadband_noise_power_dB]';       % N x 1
+N = length(BB_dB);
 
-% feature matrix: drop f0 (col 1), keep H1-H3 (cols 2:4), add U's and BB
-%   Col 1: H1 (1.0 MHz)
-%   Col 2: H2 (1.5 MHz)
-%   Col 3: H3 (2.0 MHz)
-%   Col 4: U1 (0.75 MHz)
-%   Col 5: U2 (1.25 MHz)
-%   Col 6: U3 (1.75 MHz)
-%   Col 7: Broadband Noise  
-X = [H_dB(:, 2:4), U_dB, BB_dB];
+% detect sweeps and normalize BB for labeling
+% detect concentration sweep boundaries by looking for large drops in 
+% f0 power, and normalize BB within each sweep relative to that sweep's
+% baseline (diff concentrations might have diff baseline noise floors)
+f0_dB = H_dB(:, 1);
+f0_diff = diff(f0_dB);
+reset_indices = find(f0_diff < -10);
+sweep_starts = [1; reset_indices + 1];
+sweep_ends   = [reset_indices; N];
+n_sweeps = length(sweep_starts);
+n_baseline_per_sweep = 3;
 
-% remove rows with NaN
+BB_normalized = zeros(N, 1);
+for s = 1:n_sweeps
+    idx = sweep_starts(s):sweep_ends(s);
+    base_idx = sweep_starts(s):min(sweep_starts(s) + n_baseline_per_sweep - 1, sweep_ends(s));
+    sweep_baseline = mean(BB_dB(base_idx));
+    BB_normalized(idx) = BB_dB(idx) - sweep_baseline;
+end
+
+%% MODEL SETUP / feature matrix preparation
+%  input features: H1-H3, U1-U3 (NO broadband — we're predicting it)
+%  target: broadband noise elevation 
+
+X = [H_dB(:, 2:4), U_dB];
+
+feature_names = {'H1 (1.0 MHz)', 'H2 (1.5 MHz)', 'H3 (2.0 MHz)', ...
+                 'U1 (0.75 MHz)', 'U2 (1.25 MHz)', 'U3 (1.75 MHz)'};
+n_features = length(feature_names);
+
+% remove NaN
 valid = all(~isnan(X), 2);
 X = X(valid, :);
-BB_valid = BB_dB(valid);
+y = BB_normalized(valid);  % continuous target: dB above baseline
+n_obs = sum(valid);
 
-%% create binary label y using paper's 6 dB threshold
-%  shifted: features at t predict broadband event at t+1
-baseline_BB = median(BB_valid);
-threshold = baseline_BB + 6;
+fprintf('Samples: %d, Features: %d\n', n_obs, n_features);
+fprintf('Target range: %.2f to %.2f dB above baseline\n', min(y), max(y));
 
-bb_events = double(BB_valid > threshold);
+%% train regression ensemble (predicting continuous BB elevation)
+mdl = fitrensemble(X, y, 'Method', 'Bag', 'NumLearningCycles', 100);
 
-fprintf('Broadband labeling: baseline=%.2f dB, threshold=%.2f dB\n', ...
-    baseline_BB, threshold);
-fprintf('  Events: %d / %d (%.1f%%)\n', sum(bb_events), length(bb_events), ...
-    100*sum(bb_events)/length(bb_events));
-
-% fallback if fewer than 5 events
-if sum(bb_events) < 5
-    fprintf('  Too few events — falling back to 75th percentile\n');
-    threshold = prctile(BB_valid, 75);
-    bb_events = double(BB_valid > threshold);
-    fprintf('  New threshold: %.2f dB, events: %d\n', threshold, sum(bb_events));
-end
-
-% shift: features(t) -> label(t+1)
-X = X(1:end-1, :);
-y = bb_events(2:end);
-
-n_features = size(X, 2);  % 7
-n_obs = length(y);
-
-fprintf('Final: %d samples x %d features (%d pos, %d neg)\n', ...
-    n_obs, n_features, sum(y==1), sum(y==0));
-
-%% train model
-mdl = fitrensemble(X, y, 'Method', 'Bag', 'NumLearningCycles', 50);
+% evaluate fit
+y_pred = predict(mdl, X);
+r2 = 1 - sum((y - y_pred).^2) / sum((y - mean(y)).^2);
+rmse = sqrt(mean((y - y_pred).^2));
+fprintf('R² = %.3f, RMSE = %.3f dB\n', r2, rmse);
 
 %% compute SHAP values
+fprintf('Computing SHAP values...\n');
 explainer = shapley(mdl, X, 'QueryPoints', X);
-
-% get SHAP values and reshape
 shap_table = explainer.ShapleyValues;
-shap_values = shap_table.ShapleyValue;
-shap_data = reshape(shap_values, n_obs, n_features);
+shap_values = reshape(shap_table.ShapleyValue, n_obs, n_features);
 
 % normalize SHAP values to [-1, 1]
-max_shap = max(abs(shap_data(:)));
-shap_data = shap_data / max_shap;
+max_shap = max(abs(shap_values(:)));
+shap_values = shap_values / max_shap;
 
-% calculate mean absolute SHAP for each feature
-mean_abs_shap = mean(abs(shap_data), 1);
+% mean absolute SHAP for global importance ranking (on normalized values)
+mean_abs_shap = mean(abs(shap_values), 1);
 [~, sort_idx] = sort(mean_abs_shap, 'descend');
 
-%% define feature names
-feature_names = {'H1 (1.0 MHz)', 'H2 (1.5 MHz)', 'H3 (2.0 MHz)', ...
-                 'U1 (0.75 MHz)', 'U2 (1.25 MHz)', 'U3 (1.75 MHz)', ...
-                 'BB Noise'};
+% mean signed SHAP for directionality
+mean_signed_shap = mean(shap_values, 1);
 
-%% plot
-set(0, 'DefaultFigureWindowStyle', 'normal');  % undock
-figure('Position', [100, 100, 1300, 550]);
+%% plot global feature importance + beeswarm plot
+figure('Position', [100 100 1400 550]);
 
-% left subplot: global feature importance 
+% left plot = global importance (absolute SHAP) 
 subplot(1, 2, 1);
-
-% red for BB noise, blue for everything else
-bar_colors = repmat([0.2, 0.6, 0.8], n_features, 1);
-for i = 1:n_features
-    if sort_idx(i) == 7  % BB noise index
-        bar_colors(i, :) = [0.9, 0.3, 0.3];
-    end
-end
-
-% plot bar colors individually
 hold on;
 for i = 1:n_features
-    barh(i, mean_abs_shap(sort_idx(i)), 'FaceColor', bar_colors(i,:));
+    fi = sort_idx(i);
+    barh(i, mean_abs_shap(fi), 'FaceColor', [0.2 0.6 0.8]);
 end
-hold off;
-
 set(gca, 'YDir', 'reverse');
-title('Global Feature Importance');
-xlabel('Mean |SHAP| Value');
-ylabel('Feature');
-yticks(1:n_features);
-yticklabels(feature_names(sort_idx));
-grid on;
+title('Global Feature Importance', 'FontSize', 16);
+xlabel('Mean |SHAP| Value', 'FontSize', 14);
+ylabel('Feature', 'FontSize', 14);
+yticks(1:n_features); yticklabels(feature_names(sort_idx));
+grid on; set(gca, 'FontSize', 14);
 
-% right subplot: swarm plot 
+for i = 1:n_features
+    fi = sort_idx(i);
+    text(mean_abs_shap(fi) + 0.005 * max(mean_abs_shap), i, ...
+        sprintf('%.4f', mean_abs_shap(fi)), ...
+        'FontSize', 12, 'VerticalAlignment', 'middle');
+end
+
+% right plot = beeswarm colored by feature value 
+% red = high feature value, blue = low
 subplot(1, 2, 2);
 hold on;
 for i = 1:n_features
     feat_idx = sort_idx(i);
-    feat_shap = shap_data(:, feat_idx);
+    feat_shap = shap_values(:, feat_idx);
+    feat_vals = X(:, feat_idx);
 
-    % jitter
-    jitter = 0.15 * randn(size(feat_shap));
+    % normalize feature values to [0, 1] for coloring
+    feat_norm = (feat_vals - min(feat_vals)) / (max(feat_vals) - min(feat_vals) + eps);
 
-    % plot points
-    scatter(feat_shap, i + jitter, 25, 'filled', ...
-        'MarkerFaceAlpha', 0.6, 'MarkerEdgeColor', 'k');
-
-    % add mean line
-    plot([mean(feat_shap), mean(feat_shap)], [i-0.25, i+0.25], ...
-        'r-', 'LineWidth', 2);
+    jitter = 0.15 * randn(n_obs, 1);
+    scatter(feat_shap, i + jitter, 20, feat_norm, 'filled', 'MarkerFaceAlpha', 0.6);
 end
-hold off;
+
+colormap(turbo);
+cb = colorbar;
+cb.Label.String = 'Feature Value (Low → High)';
+cb.Label.FontSize = 13;
 
 set(gca, 'YDir', 'reverse');
-title('SHAP Values Distribution');
-xlabel('SHAP Value');
-ylabel('Feature');
+xline(0, 'k--', 'LineWidth', 1.5);
+title('SHAP Values (→ = more broadband/inertial)', 'FontSize', 16);
+xlabel('SHAP Value (← Safe | Unsafe →)', 'FontSize', 14);
+yticks(1:n_features); yticklabels(feature_names(sort_idx));
 xlim([-1, 1]);
 ylim([0.5, n_features + 0.5]);
-yticks(1:n_features);
-yticklabels(feature_names(sort_idx));
-grid on;
-xline(0, 'k--', 'LineWidth', 1);
+grid on; set(gca, 'FontSize', 14);
 
-sgtitle('SHAP Analysis: In-vitro PCD (with Broadband Noise)');
-
-% add mean SHAP values as text on bar plot
-subplot(1, 2, 1);
+sgtitle(sprintf('PCD SHAP Analysis — Broadband Prediction (R² = %.3f)', r2), 'FontSize', 16);
+print('SHAP_study_replication_summary.png', '-dpng', '-r300');
+%% print results
+fprintf('\n=== FEATURE RANKING ===\n');
+fprintf('Positive SHAP = pushes toward higher broadband (inertial/unsafe)\n');
+fprintf('Negative SHAP = pushes toward lower broadband (safe)\n\n');
+fprintf('%-5s | %-20s | |SHAP|  | Signed   | Interpretation\n', 'Rank', 'Feature');
+fprintf('------|----------------------|---------|----------|------------------\n');
 for i = 1:n_features
-    feat_idx = sort_idx(i);
-    x_pos = mean_abs_shap(feat_idx) + 0.02 * max(mean_abs_shap);
-    text(x_pos, i, sprintf('%.2f', mean_abs_shap(feat_idx)), ...
-        'FontSize', 9, 'VerticalAlignment', 'middle');
-end
-
-%% print feature ranking
-fprintf('\n=== FEATURE IMPORTANCE RANKING ===\n');
-fprintf('Most Important (Top) → Least Important (Bottom):\n\n');
-for i = 1:n_features
-    feat_num = sort_idx(i);
-    marker = '';
-    if feat_num == 7
-        marker = '  <-- BB Noise';
+    fi = sort_idx(i);
+    if mean_signed_shap(fi) > 0.001
+        interp = 'Higher value → MORE broadband';
+    elseif mean_signed_shap(fi) < -0.001
+        interp = 'Higher value → LESS broadband';
+    else
+        interp = 'Mixed / nonlinear relationship';
     end
-    fprintf('%d. %s (Mean |SHAP| = %.4f)%s\n', ...
-        i, feature_names{feat_num}, mean_abs_shap(feat_num), marker);
+    fprintf('  %d   | %-20s | %.4f  | %+.4f  | %s\n', ...
+        i, feature_names{fi}, mean_abs_shap(fi), mean_signed_shap(fi), interp);
 end
-
-%% save fig
-print('SHAP_analysis_dataset1.png', '-dpng', '-r300');
