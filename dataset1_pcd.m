@@ -16,7 +16,7 @@ end
 mat_files = dir('*.mat');
 
 % alternate files b/c they increase by pressure (every other one)
-mat_files_alt = mat_files(1:2:end);
+mat_files_alt = mat_files(2:2:end);
 
 % display number and what matfiles are in mat_files_alt
 fprintf('\nfound %d .mat files (alternating):\n', length(mat_files_alt));

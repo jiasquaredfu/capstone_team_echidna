@@ -33,7 +33,7 @@ params.noise_exclusion_range = 2000;   % bins to exclude around peaks for noise
 mat_files = dir(fullfile(pcd_root, '**', '*.mat'));
 
 % Optional: alternate files if pressure ramps every other file
-mat_files = mat_files(1:2:end);
+mat_files = mat_files(2:2:end);
 
 N = length(mat_files);
 fprintf('Found %d PCD files\n', N);
