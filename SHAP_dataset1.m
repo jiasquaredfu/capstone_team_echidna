@@ -68,10 +68,6 @@ explainer = shapley(mdl, X, 'QueryPoints', X);
 shap_table = explainer.ShapleyValues;
 shap_values = reshape(shap_table.ShapleyValue, n_obs, n_features);
 
-% normalize SHAP values to [-1, 1]
-max_shap = max(abs(shap_values(:)));
-shap_values = shap_values / max_shap;
-
 % mean absolute SHAP for global importance ranking (on normalized values)
 mean_abs_shap = mean(abs(shap_values), 1);
 [~, sort_idx] = sort(mean_abs_shap, 'descend');
