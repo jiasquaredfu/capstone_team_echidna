@@ -9,11 +9,12 @@ close all;
 
 
 % Add path of imaging function 
-function_path = '/Users/jiasquared/Desktop/CODING/local_capstone_team_E/04_Projects/';
+function_path = '/Users/jiasquared/Desktop/CODING/capstone_team_echidna/04_Projects/';
 addpath(function_path);
 
 % Add path of Philips-ATL L12-5 Probe Data to read 
-probe_path = '/Users/jiasquared/Desktop/CODING/local_capstone_team_E/1_and_2_2026-01-16_single_tube_sweep/probe';
+probe_path = ['/Users/jiasquared/Desktop/CODING/capstone_team_echidna' ...
+    '/1_and_2_2026-01-16_single_tube_sweep/probe'];
 
 
 clean_data = extract_probe_data(probe_path, 1)
@@ -36,15 +37,17 @@ window_f = 0.3e6;
 window_uf = 0.05e6;  
 harmonics = 6:20; 
 
-% Processed Data Graph 
+% Normalized Data Graph 
 figure;
-plot(f/1e6, pxx_db, 'LineWidth', 1.5);  % Freq
+f_norm = f/f0
+plot(f_norm, pxx_db, 'LineWidth', 1.5);  % Freq
 hold on 
-xlabel('Frequency (MHz)');
+xlabel('Normalized Frequency');
 ylabel('Magnitude (dB)');
 title('Probe Data Frequency Domain Middle Channel Frame 1');
-xlim([0 10])  % 1.5x center frequency
+xlim([0 20])  % 1.5x center frequency
 ylim([-65, -40])  % Capture noise floor to peak
+
 
 % Data with Harmonics and Ultraharmonics
 figure;
@@ -85,51 +88,6 @@ for h = harmonics
     plot(f(peak_idx)/1e6, pxx_db(peak_idx), ...
          'go', 'MarkerFaceColor','g')
      text(f(peak_idx)/1e6, pxx_db(peak_idx)+3, ...
-         sprintf('U%d', h), ...
-         'HorizontalAlignment','center', ...
-         'FontWeight','bold');
-
-end
-
-
-% Normalized Data with Harmonics and Ultraharmonics
-f_norm = f/f0
-figure;
-plot(f_norm, pxx_db, 'LineWidth', 1.5);  % Freq
-hold on 
-xlabel('Normalized Frequency');
-ylabel('Magnitude (dB)');
-title('Probe Data Frequency Domain Middle Channel Frame 1');
-xlim([0 20])  % 1.5x center frequency
-ylim([-65, -40])  % Capture noise floor to peak
-
-for h = harmonics
-    target_f = h * f0;
-    idx_range = find(f >= target_f-window_f & f <= target_f+window_f);
-
-    [max_val, id_local] = max(pxx(idx_range));
-    peak_idx = idx_range(id_local);
-
-    plot(f_norm(peak_idx), pxx_db(peak_idx), ...
-         'ro', 'MarkerFaceColor','r')
-     text(f_norm(peak_idx), pxx_db(peak_idx)+3, ...
-         sprintf('H%d', h), ...
-         'HorizontalAlignment','center', ...
-         'FontWeight','bold');
-
-end
-
-
-for h = harmonics
-    target_f = (h+0.5) * f0;
-    idx_range = find(f >= target_f-window_uf & f <= target_f+window_uf);
-
-    [max_val, id_local] = max(pxx(idx_range));
-    peak_idx = idx_range(id_local);
-
-    plot(f_norm(peak_idx), pxx_db(peak_idx), ...
-         'go', 'MarkerFaceColor','g')
-     text(f(peak_idx), pxx_db(peak_idx)+3, ...
          sprintf('U%d', h), ...
          'HorizontalAlignment','center', ...
          'FontWeight','bold');
@@ -354,6 +312,10 @@ function features = get_features(f, pxx, pxx_db, f0)
     
         % Create mask for all frequency bins
     noise_mask = true(size(pxx));
+
+    noise_range_min = 1.5;  
+    noise_range_max = 3.0;  
+
     
     % Combine all harmonic and ultraharmonic target frequencies
     h_freqs = harmonics * f0;
