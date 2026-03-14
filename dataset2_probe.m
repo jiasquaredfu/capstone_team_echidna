@@ -1,7 +1,7 @@
 %% Dataset 2 Analysis 
 % Capstone II - Team E(Chidna)
 % JiaJia Fu 
-% 2/17/26
+% 3/14/26
 
 clear;
 clc;
@@ -30,190 +30,153 @@ frame_1 = clean_data.rf_data(:, 64, 1); % middle channels frame 1 sample
 pxx_db = 10*log10(pxx)
 
 
-%% Plot for middle channel frame 1 example 
-
-f0 = 0.5e6; 
-window_f = 0.3e6;
-window_uf = 0.05e6;  
-harmonics = 6:20; 
-
-% Normalized Data Graph 
-figure;
-f_norm = f/f0
-plot(f_norm, pxx_db, 'LineWidth', 1.5);  % Freq
-hold on 
-xlabel('Normalized Frequency');
-ylabel('Magnitude (dB)');
-title('Probe Data Frequency Domain Middle Channel Frame 1');
-xlim([0 20])  % 1.5x center frequency
-ylim([-65, -40])  % Capture noise floor to peak
-
-
-% Data with Harmonics and Ultraharmonics
-figure;
-plot(f/1e6, pxx_db, 'LineWidth', 1.5);  % Freq
-hold on 
-xlabel('Frequency (MHz)');
-ylabel('Magnitude (dB)');
-title('Probe Data Frequency Domain Middle Channel Frame 1');
-xlim([0 10])  % 1.5x center frequency
-ylim([-65, -40])  % Capture noise floor to peak
-
-
-for h = harmonics
-    target_f = h * f0;
-    h_idx_range = find(f >= target_f-window_f & f <= target_f+window_f);
-
-    [max_val, id_local] = max(pxx(h_idx_range));
-    peak_idx = h_idx_range(id_local);
-
-    plot(f(peak_idx)/1e6, pxx_db(peak_idx), ...
-         'ro', 'MarkerFaceColor','r')
-     text(f(peak_idx)/1e6, pxx_db(peak_idx)+3, ...
-         sprintf('H%d', h), ...
-         'HorizontalAlignment','center', ...
-         'FontWeight','bold');
-
-end
-
-
-for h = harmonics
-    target_f = (h+0.5) * f0;
-    u_idx_range = find(f >= target_f-window_uf & f <= target_f+window_uf);
-
-    [max_val, id_local] = max(pxx(u_idx_range));
-    peak_idx = u_idx_range(id_local);
-
-
-    plot(f(peak_idx)/1e6, pxx_db(peak_idx), ...
-         'go', 'MarkerFaceColor','g')
-     text(f(peak_idx)/1e6, pxx_db(peak_idx)+3, ...
-         sprintf('U%d', h), ...
-         'HorizontalAlignment','center', ...
-         'FontWeight','bold');
-
-end
-
-
-%% Get broadband noise 
-
-noise_exclusion_Hz = 0.05e6;  
-
-% Create mask for all frequency bins
-noise_mask = true(size(pxx));
-
-% Combine all harmonic and ultraharmonic target frequencies
-h_freqs = harmonics * f0;
-u_freqs = (harmonics + 0.5) * f0;
-all_peak_freqs = [h_freqs, u_freqs];
-
-% Exclude regions around each peak using frequency windows
-for k = 1:length(all_peak_freqs)
-    freq_center = all_peak_freqs(k);
-    noise_mask(f >= (freq_center - noise_exclusion_Hz) & f <= (freq_center + noise_exclusion_Hz)) = false;
-end
-
-% Extract PSD values in noise regions (mV^2/Hz)
-noise_psd_values = pxx(noise_mask);
-
-% Broadband noise (mean PSD)
-broadband_noise_mean_psd = mean(noise_psd_values);
-broadband_noise_mean_psd_dB = 10*log10(broadband_noise_mean_psd);
-
+%% Plot for middle channel frame 1 example
 
 figure;
-set(gcf,'Position',[100 100 1800 1000])
-hold on;
+grid on
+hold on
 
-% Full spectrum (broadband)
-h_full = plot(f/1e6, 10*log10(pxx), 'Color', [0.5 0.5 0.5], 'LineWidth', 1.5, 'DisplayName','Broadband Spectrum');
+f0 = 0.5e6;
+f_norm = f / f0;
 
-% Harmonics
-for h = harmonics
-    target_f = h * f0;
-    h_idx_range = find(f >= target_f-window_f & f <= target_f+window_f);
-    [~, id_local] = max(pxx(h_idx_range));
-    peak_idx = h_idx_range(id_local);
+% ---- Full Spectrum ----
+h_full = plot(f_norm, pxx_db, 'Color',[0.5, 0.5, 0.5], 'LineWidth', 1.5, ...
+              'DisplayName','Full PSD');
 
-    plot(f(peak_idx)/1e6, pxx_db(peak_idx), 'ro', 'MarkerFaceColor','r', 'MarkerSize',15);  % no DisplayName
-    text(f(peak_idx)/1e6, pxx_db(peak_idx)+3, sprintf('H%d', h), ...
-        'color','red', 'HorizontalAlignment','center', 'FontWeight','bold', 'FontSize', 18);
+
+% ---- Harmonics ----
+[hf, hv, uf, uv] = get_harmonics(f, pxx_db);
+
+hf_norm = hf / f0;
+uf_norm = uf / f0;
+
+h_harm = plot(hf_norm, hv, 'ro', ...
+              'MarkerFaceColor','r', ...
+              'MarkerSize',8, ...
+              'DisplayName','Harmonics');
+
+% ---- Label Harmonics ----
+for i = 1:length(hf_norm)
+    text(hf_norm(i), hv(i)+1, sprintf('H%d',i+5), ...
+        'HorizontalAlignment','center', ...
+        'FontWeight','bold');
 end
 
-% Ultraharmonics
-for h = harmonics
-    target_f = (h+0.5) * f0;
-    u_idx_range = find(f >= target_f-window_uf & f <= target_f+window_uf);
-    [~, id_local] = max(pxx(u_idx_range));
-    peak_idx = u_idx_range(id_local);
+% ---- Ultraharmonics ----
+h_ultra = plot(uf_norm, uv, '^', ...
+               'Color',[0 0.5 0], ...
+               'MarkerFaceColor',[0 0.5 0], ...
+               'MarkerSize',8, ...
+               'DisplayName','Ultraharmonics');
 
-    plot(f(peak_idx)/1e6, pxx_db(peak_idx), 'go','color',[0 0.5 0], 'MarkerFaceColor','[0 0.5 0]', 'MarkerSize',15);  % no DisplayName
-    text(f(peak_idx)/1e6, pxx_db(peak_idx)+3, sprintf('U%d', h), ...
-        'color',[0 0.5 0],'HorizontalAlignment','center', 'FontWeight','bold', 'FontSize', 18);
+for i = 1:length(uf_norm)
+    text(uf_norm(i), uv(i)+1, sprintf('U%.1f',6.5+i-1), ...
+        'HorizontalAlignment','center', ...
+        'FontWeight','bold');
 end
 
-% Noise regions
-h_noise = plot(f(noise_mask)/1e6, 10*log10(pxx(noise_mask)), 'b','DisplayName','Noise Regions');
+% ---- Broadband Noise Mask ----
+[noise_mask, noise_psd_db, broadband_noise_db] = get_bbnoise(f, pxx, hf, uf)
+pxx_noise_db = pxx_db;
+pxx_noise_db(~noise_mask) = NaN;
 
-% Labels and limits
-xlabel('Normalized Frequency (f/f0)', 'FontSize', 30, 'FontWeight','bold');
-ylabel('Magnitude (dB)', 'FontSize', 30, 'FontWeight','bold');
-title('Probe Data Frequency Domain Middle Channel Frame 1', 'FontSize', 30);
-ax = gca; % Get current axes
-ax.FontSize = 16; 
-xlim([0 8]);
-ylim([-65 -40]);
+h_noise = plot(f_norm, pxx_noise_db, 'b','LineWidth',2);
 
-% Legend with only the desired two entries
-legend([h_full, h_noise], 'FontSize', 20, 'FontWeight','bold');
-%% Extract for all datafiles 
+% ---- Baseline ----
+baseline = median(noise_psd_db); % more accurate than mean?
+
+h_base = yline(baseline, '--', ...
+               'Color',[0, 0, 0], ...
+               'LineWidth',2, ...
+               'DisplayName','Baseline');
+
+% ---- Labels ----
+xlabel('Normalized Frequency (f/f_0)', ...
+       'FontSize',20,'FontWeight','bold')
+
+ylabel('Magnitude (dB)', ...
+       'FontSize',20,'FontWeight','bold')
+
+title('Probe Data Frequency Domain - Middle Channel Frame 1', ...
+      'FontSize',20)
+
+xlim([5 13])
+ylim([-65 -40])
+
+ax = gca;
+ax.FontSize = 14;
+
+% ---- Legend ----
+legend([h_full h_noise h_base h_harm h_ultra], ...
+       {'Full PSD','Broadband Region','Baseline', ...
+        'Harmonics','Ultraharmonics'}, ...
+       'FontSize',14, ...
+       'Location','best')
+
+hold off
+
+
+
+%% Extract for all datafiles
 
 data_files = dir(fullfile(probe_path, '*.pacq*'));
+f0         = 0.5e6;
+ALL_CHANNELS = 128;
 
-all_features = [];  % struct array to store features
-channels = [1, 64, 128];  % first, middle, last channels
+% --- Preallocation ---
+temp              = extract_probe_data(probe_path, 1);
+N_frames_per_file = size(temp.rf_data, 3);
+total_rows        = length(data_files) * N_frames_per_file;
 
-% Process each data file
-for k = 1:length(data_files)
-    
-    % Extract RF data
-    clean_data = extract_probe_data(probe_path, k);
-    N_frames = size(clean_data.rf_data, 3);
-    
-    % Loop over selected channels
-    for ch = channels
-        % Loop over all frames
-        for frame_idx = 1:N_frames
-            frame = clean_data.rf_data(:, ch, frame_idx);  % single column vector
-            
-            % Compute PSD
-            [pxx, f] = pwelch(frame, [], [], [], clean_data.fs);
-            pxx_db = 10*log10(pxx);
-            
-            % Extract harmonic features
-            features = get_features(f, pxx, pxx_db, f0);
-            
-            
-            % Add metadata
-            features.filename = data_files(k).name;
-            features.channel = ch;
-            features.frame = frame_idx;
-            
-            % Append to results
-            all_features = [all_features; features];
+% Build dummy feature struct to type the preallocated array
+dummy_f   = linspace(0, 10e6, 1000)';
+dummy_pxx = ones(size(dummy_f));
+dummy_feat = get_features(dummy_f, dummy_pxx, f0);  % FIX: was build_feature_row (deleted)
+dummy_feat.filename = 'dummy.pacq';                 % FIX: add metadata fields to dummy
+dummy_feat.frame    = 0;
+
+all_features(total_rows, 1) = dummy_feat;
+row_idx = 1;
+
+% Main loop
+for i = 1:length(data_files)
+
+    clean_data = extract_probe_data(probe_path, i);  % FIX: removed stray semicolon-less call
+    N_frames   = size(clean_data.rf_data, 3);
+
+    for frame_idx = 1:N_frames
+
+        pxx_sum = [];
+
+        for ch = 1:ALL_CHANNELS
+            frame = clean_data.rf_data(:, ch, frame_idx);
+            [pxx_ch, f] = pwelch(frame, [], [], [], clean_data.fs);
+
+            if isempty(pxx_sum)
+                pxx_sum = zeros(size(pxx_ch));
+            end
+            pxx_sum = pxx_sum + pxx_ch;
         end
+
+        pxx_avg = pxx_sum / ALL_CHANNELS;  % average in linear power domain
+
+        feat = get_features(f, pxx_avg, f0);
+
+        feat.filename = data_files(i).name;
+        feat.frame    = frame_idx;
+
+        all_features(row_idx) = feat;
+        row_idx = row_idx + 1;
     end
 end
 
-% Convert struct array to table
+% Trim in case N_frames varied across files
+all_features = all_features(1:row_idx-1);
+
+% Convert and save
 features_table = struct2table(all_features);
-
-% Save to CSV
 writetable(features_table, 'probe_data_all_frames.csv');
-
 disp('Feature extraction complete for all frames!');
-
-
 
 %% Functions 
 
@@ -269,70 +232,68 @@ function out = extract_probe_data(probe_path, i)
 end
 
 
-function features = get_features(f, pxx, pxx_db, f0)
-    noise_exclusion_Hz = 0.05e6;  
-    harmonics = 6:20;
-    window_f = 0.3e6;
-    window_uf = 0.05e6;
+function features = get_features(f, pxx, f0)
+    pxx_db = 10*log10(pxx);
+    df     = f(2) - f(1);
+
+    harmonics      = 6:12;
+    ultraharmonics = 6.5:1:12.5;
+    search_window  = round(0.08e6 / df);
 
     features = struct();
 
-    % Harmonics
-    for h = harmonics
-        target_f = h * f0;
-        idx_range = find(f >= target_f-window_f & f <= target_f+window_f);
+    % Accumulators for BB noise exclusion — populated during loops below
+    harm_freq_vals  = zeros(1, length(harmonics));
+    ultra_freq_vals = zeros(1, length(ultraharmonics));
 
-        if isempty(idx_range), continue; end
+    % --- Harmonics ---
+    for i = 1:length(harmonics)
+        target_f  = harmonics(i) * f0;
+        [~, cidx] = min(abs(f - target_f));
+        idx_range = max(1, cidx-search_window) : min(length(f), cidx+search_window);
 
-        [~, id_local] = max(pxx(idx_range));
-        peak_idx = idx_range(id_local);
+        [~, local] = max(pxx_db(idx_range));
+        peak_idx   = idx_range(local);
 
-        % calculate power from psd by taking integral 
-        features.(['H',num2str(h),'_freq']) = f(peak_idx);
-        features.(['H',num2str(h),'_power']) = trapz(f(idx_range), pxx(idx_range));
-        features.(['H',num2str(h),'_db']) = pxx_db(peak_idx);
+        h = harmonics(i);
+        features.(sprintf('H%d_freq',  h)) = f(peak_idx);
+        features.(sprintf('H%d_db',    h)) = pxx_db(peak_idx);
+        features.(sprintf('H%d_power', h)) = trapz(f(idx_range), pxx(idx_range));
+
+        harm_freq_vals(i) = f(peak_idx);   % save for BB exclusion
     end
 
-    % Ultra-harmonics
-    for h = harmonics
-        target_f = (h + 0.5) * f0;
-        idx_range = find(f >= target_f-window_uf & f <= target_f+window_uf);
+    % --- Ultraharmonics ---
+    for i = 1:length(ultraharmonics)
+        target_f  = ultraharmonics(i) * f0;
+        [~, cidx] = min(abs(f - target_f));
+        idx_range = max(1, cidx-search_window) : min(length(f), cidx+search_window);
 
-        if isempty(idx_range), continue; end
+        [~, local] = max(pxx_db(idx_range));
+        peak_idx   = idx_range(local);
 
-        [~, id_local] = max(pxx(idx_range));
-        peak_idx = idx_range(id_local);
+        u = ultraharmonics(i) * 10;
+        features.(sprintf('U%d_freq',  u)) = f(peak_idx);
+        features.(sprintf('U%d_db',    u)) = pxx_db(peak_idx);
+        features.(sprintf('U%d_power', u)) = trapz(f(idx_range), pxx(idx_range));
 
-        features.(['U',num2str(h),'_freq']) = f(peak_idx);
-        features.(['U',num2str(h),'_power']) = trapz(f(idx_range), pxx(idx_range));
-        features.(['U',num2str(h),'_db']) = pxx_db(peak_idx);
+        ultra_freq_vals(i) = f(peak_idx);  % save for BB exclusion
     end
 
-        %Broad-band Noise 
-    
-        % Create mask for all frequency bins
-    noise_mask = true(size(pxx));
+    % --- Broadband noise ---
+    all_peak_freqs = [harm_freq_vals(:); ultra_freq_vals(:)];
+    noise_range_min = 9 * f0;
+    noise_range_max = 10.5 * f0;
+    noise_exclusion_Hz = 0.08e6;
 
-    noise_range_min = 1.5;  
-    noise_range_max = 3.0;  
-
-    
-    % Combine all harmonic and ultraharmonic target frequencies
-    h_freqs = harmonics * f0;
-    u_freqs = (harmonics + 0.5) * f0;
-    all_peak_freqs = [h_freqs, u_freqs];
-    
-    % Exclude regions around each peak using frequency windows
+    noise_mask = (f >= noise_range_min) & (f <= noise_range_max);
     for k = 1:length(all_peak_freqs)
-        freq_center = all_peak_freqs(k);
-        noise_mask(f >= (freq_center - noise_exclusion_Hz) & f <= (freq_center + noise_exclusion_Hz)) = false;
+        noise_mask(abs(f - all_peak_freqs(k)) <= noise_exclusion_Hz) = false;
     end
-    
-    % Extract PSD values in noise regions (mV^2/Hz)
-    noise_psd_values = pxx(noise_mask);
-    
-    % Store mean PSD and dB
-    features.broadband_noise_psd = mean(noise_psd_values);
-    features.broadband_noise_dB  = 10*log10(features.broadband_noise_psd);
 
+    noise_psd = pxx(noise_mask);
+    features.broadband_noise_db = 10*log10(mean(noise_psd));
+    features.broadband_noise_power = trapz(f(noise_mask), noise_psd);
 end
+
+
