@@ -1,4 +1,4 @@
-%% in-vitro PCD Dataset — Batch Harmonic Analysis 
+%% in-vitro PCD Dataset — Batch Harmonic Analysis
 %% PCD Dataset — Batch Harmonic & Ultraharmonic Power Extraction + Broadband Noise
 clear; clc; close all;
 
@@ -33,7 +33,7 @@ params.noise_exclusion_range = 2000;   % bins to exclude around peaks for noise
 mat_files = dir(fullfile(pcd_root, '**', '*.mat'));
 
 % Optional: alternate files if pressure ramps every other file
-mat_files = mat_files(2:2:end);
+mat_files = mat_files(1:2:end);
 
 N = length(mat_files);
 fprintf('Found %d PCD files\n', N);
@@ -87,9 +87,11 @@ for i = 1:N
     Results(i).broadband_noise_power_dB = BBnoise_dB;
     Results(i).noise_percentage = noise_pct;
     
-    fprintf('  Broadband Noise: %.2f dB (%.1f%% of spectrum used)\n', BBnoise_dB, noise_pct);
+for k = 1:length(BBnoise_dB)
+    fprintf('  U%.1f Broadband Noise: %.2f dB (%.1f%% used)\n', ...
+        params.uh_orders(k), BBnoise_dB(k), noise_pct(k));
 end
-
+end 
 %% Convert results to flat table (power + index + broadband noise)
 
 % Extract arrays
@@ -97,7 +99,7 @@ H  = vertcat(Results.harmonic_power_dB);        % N × 4
 U  = vertcat(Results.ultraharmonic_power_dB);   % N × 3
 Hi = vertcat(Results.harmonic_indices);         % N × 4
 Ui = vertcat(Results.ultraharmonic_indices);    % N × 3
-BB = [Results.broadband_noise_power_dB]';       % N × 1
+BB = vertcat(Results.broadband_noise_power_dB); % ✅ N × 3
 
 % Build table
 ResultTable = table( ...
@@ -106,14 +108,14 @@ ResultTable = table( ...
     H(:,1),  H(:,2),  H(:,3),  H(:,4), ...
     Ui(:,1), Ui(:,2), Ui(:,3), ...
     U(:,1),  U(:,2),  U(:,3), ...
-    BB, ...
+    BB(:,1), BB(:,2), BB(:,3), ...
     'VariableNames', { ...
         'File', ...
         'f0_idx','H1_idx','H2_idx','H3_idx', ...
         'f0_dB','H1_dB','H2_dB','H3_dB', ...
         'U1_idx','U2_idx','U3_idx', ...
         'U1_dB','U2_dB','U3_dB', ...
-        'Broadband_Noise_dB' } );
+        'U1_BB_dB','U2_BB_dB','U3_BB_dB' } );
 
 disp(ResultTable)
 
@@ -124,8 +126,6 @@ writetable(ResultTable, 'PCD_Harmonic_Features.csv');
 save('PCD_Features_AllFiles.mat', 'Results', 'ResultTable')
 
 fprintf('\n✓ PCD feature extraction complete (with broadband noise)\n');
-
-
 %% Functions
 function [pxx, f] = compute_pwelch(signal, Tinterval)
 % Computes Welch power spectrum using dataset sampling interval
@@ -193,61 +193,64 @@ end
 end
 
 function [noise_power, noise_power_dB, noise_percentage] = calculate_broadband_noise(pxx, f, harm_idx, uh_idx, params)
-% Calculate broadband noise by excluding regions around harmonics and ultraharmonics
-% Only considers frequency range between 1.5*f0 and 3*f0
-% Returns average power per bin in noise regions
+% Broadband noise calculated PER ULTRAHARMONIC (same as single-file code)
 
-% Fundamental frequency (Hz)
-f0 = params.drive_frequency;  
+df = f(2) - f(1);
 
-% Normalize frequency for convenience
-f_norm = f / f0;
+nUH = length(uh_idx);
 
-% Define broadband noise range
-noise_range_min = 1.5;  
-noise_range_max = 3.0;  
+noise_power = zeros(1, nUH);
+noise_power_dB = zeros(1, nUH);
+noise_percentage = zeros(1, nUH);
 
-% Mask for frequency range
-freq_mask = (f_norm >= noise_range_min) & (f_norm <= noise_range_max);
+% Use same parameters as your working script
+bin_range = params.bin_range;
+noise_exclusion = 50;   % match your fixed plotting code
 
-% Create mask for all frequency bins (start with all bins included)
-noise_mask = true(size(pxx));
-
-% Combine all peak indices
-all_peak_idx = [harm_idx, uh_idx];
-all_peak_idx = all_peak_idx(~isnan(all_peak_idx));  % Remove NaN values
-
-% Exclude regions around each peak
-for k = 1:length(all_peak_idx)
-    startBin = max(1, all_peak_idx(k) - params.noise_exclusion_range);
-    endBin   = min(length(pxx), all_peak_idx(k) + params.noise_exclusion_range);
-    noise_mask(startBin:endBin) = false;
-end
-
-% Combine with frequency range mask
-final_noise_mask = noise_mask & freq_mask;
-
-% Get noise bins (power spectral density values)
-noise_bins_psd = pxx(final_noise_mask);
-
-if ~isempty(noise_bins_psd)
-    % Frequency resolution
-    df = f(2) - f(1);  
+for k = 1:nUH
     
-    % Convert PSD to power for each bin
-    noise_bins_power = noise_bins_psd * df;  
-    
-    % Take the average of the power values
-    noise_power = mean(noise_bins_power);
-    noise_power_dB = 10*log10(noise_power);
-    
-    % Calculate percentage of spectrum used for noise
-    noise_percentage = 100 * sum(final_noise_mask) / length(pxx);
-else
-    noise_power = NaN;
-    noise_power_dB = NaN;
-    noise_percentage = 0;
-    warning('No frequency bins available for noise calculation within 1.5f0–3f0');
+    center_idx = uh_idx(k);
+
+    if isnan(center_idx) || center_idx <= 0
+        noise_power(k) = NaN;
+        noise_power_dB(k) = NaN;
+        noise_percentage(k) = 0;
+        continue
+    end
+
+    % Define window around ultraharmonic
+    startBin = max(1, center_idx - bin_range);
+    endBin   = min(length(pxx), center_idx + bin_range);
+
+    % Create local mask
+    local_mask = true(endBin - startBin + 1, 1);
+
+    % Exclude peak region
+    peak_start = max(startBin, center_idx - noise_exclusion);
+    peak_end   = min(endBin, center_idx + noise_exclusion);
+
+    local_mask((peak_start - startBin + 1):(peak_end - startBin + 1)) = false;
+
+    % Extract PSD
+    local_psd = pxx(startBin:endBin);
+    noise_psd = local_psd(local_mask);
+
+    if isempty(noise_psd)
+        noise_power(k) = NaN;
+        noise_power_dB(k) = NaN;
+        noise_percentage(k) = 0;
+        continue
+    end
+
+    % Convert PSD → power
+    noise_power_bins = noise_psd * df;
+
+    % Average noise power (same as your original script)
+    noise_power(k) = mean(noise_power_bins);
+    noise_power_dB(k) = 10*log10(noise_power(k));
+
+    % % of bins used (optional but useful)
+    noise_percentage(k) = 100 * sum(local_mask) / length(local_mask);
 end
 
 end
