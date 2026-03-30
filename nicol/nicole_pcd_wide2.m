@@ -5,7 +5,7 @@ pcdRoot = 'C:\Users\njcho\OneDrive\Documents\CAPSTONE\1_and_2_2026-01-16_single_
 
 saveCSV = fullfile('C:\Users\njcho\OneDrive\Documents\CAPSTONE\1_and_2_2026-01-16_single_tube_sweep', 'pcd_allfolders.csv');
 
-f0 = 1e6;                  % fundamental frequency in Hz
+f0 = 0.5e6;                % fundamental frequency in Hz
 searchWidthHz = 0.10e6;    % UH peak search half-width
 bbWindowHz    = 0.05e6;    % broadband averaging half-width
 guardWidthHz  = 0.005e6;   % exclude around UH peak
@@ -184,18 +184,13 @@ for k = 1:nFiles
     x  = double(S.B(:));
     Fs = 1 / double(S.Tinterval);
 
-    N = length(x);
+    % PWELCH (replaces FFT block)
+    window   = hamming(1024);
+    noverlap = 512;
+    nfft     = 2048;
 
-    % FFT
-    X = fft(x);
-    P2 = abs(X) / N;
-    P1 = P2(1:floor(N/2)+1);
-    if numel(P1) > 2
-        P1(2:end-1) = 2 * P1(2:end-1);
-    end
-
-    f = (0:floor(N/2))' * Fs / N;
-    spec_dB = 20 * log10(P1 + eps);
+    [pxx, f] = pwelch(x, window, noverlap, nfft, Fs);
+    spec_dB = 10 * log10(pxx + eps);
 
     Folder(k) = string(fileList(k).group);
     File(k)   = string(fileList(k).name);
