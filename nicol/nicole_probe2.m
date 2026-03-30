@@ -15,8 +15,9 @@ end
 %% =========================
 % SETTINGS
 %% =========================
-f0 = 0.5e6;               % 500 kHz
-probe_fs_fallback = 20e6; % used only if fs is not available
+f0 = 0.5e6;                % 500 kHz
+probe_fs_fallback = 20e6;  % used only if fs is not available
+middle_channel = 64;       % use only this channel
 
 harmonics = 6:12;
 ultras    = 6.5:1:12.5;
@@ -47,16 +48,16 @@ for i = 1:numel(all_files)
     fname = string(all_files(i).name);
     fnameLower = lower(fname);
 
-    % Only BMode files are allowed
-    if ~startsWith(fname, "BMode_")
+    % Only PCI files are allowed
+    if ~startsWith(fname, "PCI_")
         continue;
     end
 
     % Regular experiment files:
-    % BMode_..._01.pacq or BMode_..._02.pacq
+    % PCI_..._01.pacq or PCI_..._02.pacq
     isRegular = contains(fnameLower, '_01.pacq') || contains(fnameLower, '_02.pacq');
 
-    % Ambient BMode files only
+    % Ambient PCI files only
     ambientHit = false;
     for k = 1:numel(ambientKeywords)
         if contains(fnameLower, ambientKeywords{k})
@@ -77,10 +78,10 @@ data_files = all_files(keep_mask);
 data_isAmbient = isAmbient(keep_mask);
 
 if isempty(data_files)
-    error('No matching BMode probe files found.');
+    error('No matching PCI probe files found.');
 end
 
-fprintf('Found %d selected BMode probe files:\n', numel(data_files));
+fprintf('Found %d selected PCI probe files:\n', numel(data_files));
 for i = 1:numel(data_files)
     if data_isAmbient(i)
         fprintf('  %s  [ambient]\n', data_files(i).name);
@@ -122,36 +123,29 @@ for i = 1:numel(data_files)
     nFrames = size(rf_data, 3);
     nCh     = size(rf_data, 2);
 
+    if nCh < middle_channel
+        error('File %s has only %d channels. Cannot use channel %d.', ...
+            data_files(i).name, nCh, middle_channel);
+    end
+
     if data_isAmbient(i)
         sourceType = "ambient";
     else
         sourceType = "experiment";
     end
 
-    fprintf('Processing %s (%d frames) [%s]\n', data_files(i).name, nFrames, sourceType);
+    fprintf('Processing %s (%d frames) [%s] using channel %d\n', ...
+        data_files(i).name, nFrames, sourceType, middle_channel);
 
     for frame_idx = 1:nFrames
 
-        pxx_sum = [];
-        f_ref   = [];
+        % Use ONLY channel 64
+        sig = double(rf_data(:, middle_channel, frame_idx));
+        sig = sig(:);
 
-        for ch = 1:nCh
-            sig = double(rf_data(:, ch, frame_idx));
-            sig = sig(:);
-
-            [pxx_ch, f_ch] = pwelch(sig, [], [], [], fs);
-            pxx_ch = pxx_ch(:);
-            f_ch   = f_ch(:);
-
-            if isempty(pxx_sum)
-                pxx_sum = zeros(size(pxx_ch));
-                f_ref = f_ch;
-            end
-
-            pxx_sum = pxx_sum + pxx_ch;
-        end
-
-        pxx_avg = pxx_sum / nCh;
+        [pxx_use, f_ref] = pwelch(sig, [], [], [], fs);
+        pxx_use = pxx_use(:);
+        f_ref   = f_ref(:);
 
         feat = template;
         feat.SourceType = sourceType;
@@ -163,7 +157,7 @@ for i = 1:numel(data_files)
         % Harmonics
         for h = harmonics
             target_f = h * f0;
-            [pk_freq, pk_db, pk_power] = extract_peak_band(f_ref, pxx_avg, target_f, search_half_width_Hz);
+            [pk_freq, pk_db, pk_power] = extract_peak_band(f_ref, pxx_use, target_f, search_half_width_Hz);
 
             feat.(sprintf('H%d_freq', h))  = pk_freq;
             feat.(sprintf('H%d_db', h))    = pk_db;
@@ -179,7 +173,7 @@ for i = 1:numel(data_files)
             target_f = u * f0;
             u_label = ultra_label(u);   % valid MATLAB name, e.g. U6p5
 
-            [pk_freq, pk_db, pk_power] = extract_peak_band(f_ref, pxx_avg, target_f, search_half_width_Hz);
+            [pk_freq, pk_db, pk_power] = extract_peak_band(f_ref, pxx_use, target_f, search_half_width_Hz);
 
             feat.(sprintf('%s_freq',  u_label)) = pk_freq;
             feat.(sprintf('%s_db',    u_label)) = pk_db;
@@ -192,7 +186,7 @@ for i = 1:numel(data_files)
 
         % Broadband noise
         [bb_db, bb_power] = extract_broadband_noise( ...
-            f_ref, pxx_avg, bb_low_Hz, bb_high_Hz, peak_freqs, bb_exclusion_Hz);
+            f_ref, pxx_use, bb_low_Hz, bb_high_Hz, peak_freqs, bb_exclusion_Hz);
 
         feat.broadband_noise_db    = bb_db;
         feat.broadband_noise_power = bb_power;
