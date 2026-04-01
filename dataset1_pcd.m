@@ -99,32 +99,10 @@ for k = 1:length(uh_orders)
     ultraharmonic_amplitudes(k) = max_val;
 end
 
-%% === BROADBAND NOISE (target file) ===
-noise_exclusion  = 1000;
-uh_upper_harm    = [2, 3, 4];
 
-broadband_noise_power    = zeros(1, length(uh_orders));
-broadband_noise_power_dB = zeros(1, length(uh_orders));
-bb_bounds                = zeros(length(uh_orders), 2);
-
-for k = 1:length(uh_orders)
-    uh_idx   = ultraharmonic_indices(k);
-    h_hi_idx = harmonic_indices(uh_upper_harm(k));
-    bb_start = max(1,           uh_idx   + noise_exclusion + 1);
-    bb_end   = min(length(pxx), h_hi_idx - noise_exclusion - 1);
-    if bb_end <= bb_start
-        warning('Empty BB region for U%.1f', uh_orders(k));
-        continue
-    end
-    noise_psd                    = pxx(bb_start:bb_end);
-    broadband_noise_power(k)     = mean(noise_psd * df);
-    broadband_noise_power_dB(k)  = 10*log10(broadband_noise_power(k));
-    bb_bounds(k,:)               = [bb_start, bb_end];
-end
-
-noise_floor_dB = mean(broadband_noise_power_dB, 'omitnan');
 
 %% === AMBIENT THRESHOLD COMPUTATION ===
+% Load the SINGLE ambient file that matches file_number (same pressure level)
 
 amb_files = dir(fullfile(ambient_path, '*.mat'));
 if isempty(amb_files)
@@ -133,65 +111,196 @@ end
 
 amb_files_alt = amb_files(2:2:end);
 n_amb = length(amb_files_alt);
-fprintf('\nAmbient files used for threshold (%d total):\n', n_amb);
-for i = 1:n_amb
-    fprintf('  %d. %s\n', i, amb_files_alt(i).name);
+
+% --- Guard: ensure the matched index exists ---
+if file_number > n_amb
+    error(['file_number (%d) exceeds the number of alternating ambient files (%d).\n' ...
+           'Cannot form a matched ambient baseline.'], file_number, n_amb);
 end
 
-% Collect per-file UH peak dB values from every ambient file
-% Rows = ambient files, Cols = UH order (1.5, 2.5, 3.5)
-amb_uh_dB = NaN(n_amb, length(uh_orders));
+matched_amb_file = fullfile(ambient_path, amb_files_alt(file_number).name);
+fprintf('\nMatched ambient file (same pressure index %d): %s\n', ...
+    file_number, amb_files_alt(file_number).name);
 
-for i = 1:n_amb
-    try
-        amb_data = load(fullfile(ambient_path, amb_files_alt(i).name));
-        [amb_pxx, amb_f] = pwelch(amb_data.B, [], [], [], 1/amb_data.Tinterval);
-        amb_spec = sqrt(amb_pxx);
-        amb_df   = amb_f(2) - amb_f(1);
-        amb_sr   = bin_range * amb_df;
+% Compute Welch spectrum for the matched ambient file
+amb_data = load(matched_amb_file);
+[amb_pxx, amb_f] = pwelch(amb_data.B, [], [], [], 1/amb_data.Tinterval);
+amb_spec = sqrt(amb_pxx);
+amb_df   = amb_f(2) - amb_f(1);
+amb_sr   = bin_range * amb_df;
 
-        for k = 1:length(uh_orders)
-            f_target   = uh_orders(k) * drive_frequency;
-            idx_window = find(amb_f >= f_target - amb_sr & amb_f <= f_target + amb_sr);
-            if isempty(idx_window), continue; end
-            peak_amp       = max(amb_spec(idx_window));
-            amb_uh_dB(i,k) = 20*log10(peak_amp + eps);
-        end
-    catch ME
-        warning('Could not process ambient file %s: %s', amb_files_alt(i).name, ME.message);
+% UH peak amplitudes (dB) from the matched ambient file
+amb_uh_peak_dB = NaN(1, length(uh_orders));
+for k = 1:length(uh_orders)
+    f_target   = uh_orders(k) * drive_frequency;
+    idx_window = find(amb_f >= f_target - amb_sr & amb_f <= f_target + amb_sr);
+    if isempty(idx_window)
+        warning('No ambient points found for U%.1f', uh_orders(k));
+        continue
     end
+    peak_amp           = max(amb_spec(idx_window));
+    amb_uh_peak_dB(k)  = 20*log10(peak_amp + eps);
 end
 
-% Per-UH statistics across ambient files
-amb_mean_dB = mean(amb_uh_dB, 1, 'omitnan');
-amb_std_dB  = std( amb_uh_dB, 0, 1, 'omitnan');
-threshold_dB = amb_mean_dB + threshold_N * amb_std_dB;
+% -----------------------------------------------------------------
+% Threshold = ambient peak + N * (per-UH noise std of ambient file)
+%
+% "std" here is estimated from the spectral variance inside the same
+% search window of the AMBIENT file, giving a per-UH spread estimate
+% even from a single file.
+% -----------------------------------------------------------------
+amb_uh_std_dB = NaN(1, length(uh_orders));
+for k = 1:length(uh_orders)
+    f_target   = uh_orders(k) * drive_frequency;
+    idx_window = find(amb_f >= f_target - amb_sr & amb_f <= f_target + amb_sr);
+    if isempty(idx_window), continue; end
+    window_vals_dB      = 20*log10(amb_spec(idx_window) + eps);
+    amb_uh_std_dB(k)    = std(window_vals_dB);
+end
 
-% Target file UH peak dB (for comparison in table)
+threshold_dB = amb_uh_peak_dB + threshold_N * amb_uh_std_dB;
+
+% Target file UH peak dB (for comparison)
 target_uh_dB = 20*log10(ultraharmonic_amplitudes + eps);
 
-% Exceeds threshold flag
+% Exceeds threshold flag (UH)
 exceeds = target_uh_dB > threshold_dB;
 
-%% === PRINT THRESHOLD TABLE ===
-fprintf('\n=== Ultraharmonic Threshold Summary (Mean + %d\xd7Std of Ambient) ===\n', threshold_N);
-fprintf('%-6s  %10s  %10s  %10s  %12s  %8s\n', ...
-    'UH', 'Ambient Mean', 'Ambient Std', 'Threshold', 'Target Peak', 'Exceeds?');
-fprintf('%s\n', repmat('-', 1, 65));
+%% === HARMONIC THRESHOLD COMPUTATION ===
+% For harmonics, the ambient file at the same pressure ALREADY contains
+% harmonic energy from the transducer drive, so using the ambient peak
+% inside the harmonic window as a baseline is too conservative.
+% Instead, threshold = ambient noise floor (mean PSD in inter-harmonic
+% gaps) + N * std of that noise floor — i.e. "is this harmonic above
+% the ambient noise?", not "is it above ambient harmonic energy?".
+
+% Estimate ambient noise floor from inter-harmonic regions
+% Use gaps between harmonics, excluding ±bin_range bins around each harmonic
+amb_noise_mask = true(size(amb_f));
+for k = 1:n_harmonics
+    [~, h_idx] = min(abs(amb_f - harmonic_freqs(k)));
+    lo = max(1, h_idx - bin_range);
+    hi = min(length(amb_f), h_idx + bin_range);
+    amb_noise_mask(lo:hi) = false;
+end
+% Also exclude UH regions
+for k = 1:length(uh_orders)
+    f_target = uh_orders(k) * drive_frequency;
+    [~, u_idx] = min(abs(amb_f - f_target));
+    lo = max(1, u_idx - bin_range);
+    hi = min(length(amb_f), u_idx + bin_range);
+    amb_noise_mask(lo:hi) = false;
+end
+
+amb_noise_vals_dB  = 20*log10(amb_spec(amb_noise_mask) + eps);
+amb_noise_mean_dB  = mean(amb_noise_vals_dB);
+amb_noise_std_dB   = std(amb_noise_vals_dB);
+harmonic_threshold_dB_scalar = amb_noise_mean_dB + threshold_N * amb_noise_std_dB;
+
+% Same threshold applied to all harmonics (H2, H3, H4)
+harmonic_threshold_dB = NaN(1, n_harmonics);
+harmonic_threshold_dB(2:end) = harmonic_threshold_dB_scalar;
+
+% For display: store ambient noise stats per harmonic column (same value repeated)
+amb_harm_peak_dB = repmat(amb_noise_mean_dB, 1, n_harmonics);
+amb_harm_std_dB  = repmat(amb_noise_std_dB,  1, n_harmonics);
+
+target_harm_dB  = 20*log10(harmonic_amplitudes + eps);
+% harmonic_amplitudes(1) = f0, (2) = H1, (3) = H2, (4) = H3
+% harmonic_threshold_dB(1) = NaN (f0 skipped), (2:end) = computed
+exceeds_harm    = false(1, n_harmonics);
+exceeds_harm(1) = true;   % f0 always shown
+for k = 2:n_harmonics
+    exceeds_harm(k) = target_harm_dB(k) > harmonic_threshold_dB(k);
+end
+
+%% === PRINT THRESHOLD TABLES ===
+
+% --- Harmonic table (H2, H3, H4) ---
+fprintf('\n=== Harmonic Threshold Summary ===\n');
+fprintf('Matched ambient file index: %d  →  %s\n', file_number, amb_files_alt(file_number).name);
+fprintf('Threshold = Ambient Noise Floor Mean + %d × Std  (inter-harmonic gaps)  [f0 always shown]\n', threshold_N);
+fprintf('Ambient noise floor: Mean = %.2f dB,  Std = %.2f dB,  Threshold = %.2f dB\n\n', ...
+    amb_noise_mean_dB, amb_noise_std_dB, harmonic_threshold_dB_scalar);
+fprintf('%-6s  %12s  %10s  %8s\n', 'H', 'Target Peak', 'Threshold', 'Exceeds?');
+fprintf('%s\n', repmat('-', 1, 45));
+for k = 2:n_harmonics
+    flag = 'NO';
+    if exceeds_harm(k), flag = 'YES ***'; end
+    fprintf('H%-5d  %+12.2f  %+10.2f  %s\n', ...
+        k-1, target_harm_dB(k), harmonic_threshold_dB(k), flag);
+end
+fprintf('%s\n', repmat('-', 1, 45));
+
+% --- Ultraharmonic table ---
+fprintf('\n=== Ultraharmonic Threshold Summary ===\n');
+fprintf('Matched ambient file index: %d  →  %s\n', file_number, amb_files_alt(file_number).name);
+fprintf('Threshold = Ambient Peak + %d × Std(ambient search window)\n\n', threshold_N);
+fprintf('%-6s  %12s  %12s  %10s  %12s  %8s\n', ...
+    'UH', 'Amb Peak (dB)', 'Amb Std (dB)', 'Threshold', 'Target Peak', 'Exceeds?');
+fprintf('%s\n', repmat('-', 1, 70));
 for k = 1:length(uh_orders)
     flag = 'NO';
     if exceeds(k), flag = 'YES ***'; end
-    fprintf('U%-5.1f  %+10.2f  %+10.2f  %+10.2f  %+12.2f  %s\n', ...
+    fprintf('U%-5.1f  %+12.2f  %+12.2f  %+10.2f  %+12.2f  %s\n', ...
         uh_orders(k), ...
-        amb_mean_dB(k), ...
-        amb_std_dB(k), ...
+        amb_uh_peak_dB(k), ...
+        amb_uh_std_dB(k), ...
         threshold_dB(k), ...
         target_uh_dB(k), ...
         flag);
 end
-fprintf('%s\n', repmat('-', 1, 65));
-fprintf('All values in dB (20\xb7log10 of Welch amplitude spectrum)\n');
-fprintf('Threshold = Ambient Mean + %d \xd7 Ambient Std\n', threshold_N);
+fprintf('%s\n', repmat('-', 1, 70));
+fprintf('All values in dB (20·log10 of Welch amplitude spectrum)\n');
+
+%% === SAFETY ASSESSMENT (U1.5 Broadband Region) ===
+% Bandpass filter both target and matched ambient to the U1.5 BB region
+% [1.5*f0 + bin_range*df  →  2.0*f0 - bin_range*df]
+
+fs          = 1 / reader.Tinterval;
+bb_lo       = (1.5 * drive_frequency + bin_range * df) / (fs/2);
+bb_hi       = (2.0 * drive_frequency - bin_range * df) / (fs/2);
+
+% Clamp to valid range
+bb_lo = max(bb_lo, 1e-4);
+bb_hi = min(bb_hi, 1 - 1e-4);
+
+[b_bp, a_bp] = butter(4, [bb_lo, bb_hi], 'bandpass');
+
+target_filtered  = filtfilt(b_bp, a_bp, double(reader.B));
+ambient_filtered = filtfilt(b_bp, a_bp, double(amb_data.B));
+
+target_bb_std  = std(target_filtered);
+ambient_bb_std = std(ambient_filtered);
+ambient_bb_mean = mean(ambient_filtered);  % should be ~0 for bandpassed signal
+
+% Thresholds: ambient std + 1,2,3 x ambient std (i.e. 2,3,4 x amb std total)
+thresh_1s = ambient_bb_std * 2;   % mean≈0, so mean+1σ = 1σ+1σ
+thresh_2s = ambient_bb_std * 3;
+thresh_3s = ambient_bb_std * 4;
+
+% Determine safety level
+if target_bb_std > thresh_3s
+    safety_label = 'UNSAFE (> 3σ)';
+elseif target_bb_std > thresh_2s
+    safety_label = 'UNSAFE (> 2σ)';
+elseif target_bb_std > thresh_1s
+    safety_label = 'UNSAFE (> 1σ)';
+else
+    safety_label = 'SAFE';
+end
+
+fprintf('\n=== Safety Assessment: U1.5 Broadband Region ===\n');
+fprintf('Bandpass range:        %.4f – %.4f MHz\n', ...
+    (1.5*drive_frequency + bin_range*df)/1e6, ...
+    (2.0*drive_frequency - bin_range*df)/1e6);
+fprintf('Ambient BB std:        %.6f\n', ambient_bb_std);
+fprintf('Target  BB std:        %.6f\n', target_bb_std);
+fprintf('\n  Threshold 1σ:  %.6f  →  %s\n', thresh_1s, string_exceed(target_bb_std > thresh_1s));
+fprintf('  Threshold 2σ:  %.6f  →  %s\n', thresh_2s, string_exceed(target_bb_std > thresh_2s));
+fprintf('  Threshold 3σ:  %.6f  →  %s\n', thresh_3s, string_exceed(target_bb_std > thresh_3s));
+fprintf('\n  *** OVERALL: %s ***\n', safety_label);
+fprintf('%s\n', repmat('-', 1, 50));
 
 %% === LEGACY CONSOLE OUTPUT ===
 fprintf('\n=== Ultraharmonic Peak Detection ===\n');
@@ -220,16 +329,7 @@ for k = 1:length(uh_orders)
         uh_orders(k), f(ultraharmonic_indices(k))/1e6, power_dB);
 end
 
-fprintf('\n=== Broadband Noise per Ultraharmonic (UH right edge to next harmonic) ===\n');
-for k = 1:length(uh_orders)
-    bb_start = bb_bounds(k,1);
-    bb_end   = bb_bounds(k,2);
-    if bb_end <= bb_start, continue; end
-    fprintf('U%.1f to H%d: [%.3f - %.3f] f0, BB = %.2f dB\n', ...
-        uh_orders(k), uh_upper_harm(k)-1, ...
-        f(bb_start)/drive_frequency, f(bb_end)/drive_frequency, ...
-        broadband_noise_power_dB(k));
-end
+
 
 %% === PLOT ===
 f_norm      = f / drive_frequency;
@@ -245,17 +345,22 @@ plot(ax, f_norm, spectrum_dB, ...
     'Color', [0.75 0.75 0.75], 'LineWidth', 1.2, ...
     'DisplayName', 'Full Acoustic Spectrum');
 
-% Broadband noise highlight
+% Broadband noise highlight — shade between each UH and the next harmonic
+% bb_regions: [f_start, f_end] in normalised units (f/f0)
+bin_range_norm = bin_range * df / drive_frequency;  % bin_range in normalised units
+bb_regions = [1.5 + bin_range_norm, 2.0 - bin_range_norm;
+              2.5 + bin_range_norm, 3.0 - bin_range_norm;
+              3.5 + bin_range_norm, 4.0 - bin_range_norm];
+
 first_plotted = false;
-for k = 1:length(uh_orders)
-    bb_start = bb_bounds(k,1);
-    bb_end   = bb_bounds(k,2);
-    if bb_end <= bb_start, continue; end
+for k = 1:size(bb_regions, 1)
+    mask = f_norm >= bb_regions(k,1) & f_norm <= bb_regions(k,2);
+    if ~any(mask), continue; end
     seg = NaN(size(spectrum_dB));
-    seg(bb_start:bb_end) = spectrum_dB(bb_start:bb_end);
+    seg(mask) = spectrum_dB(mask);
     if ~first_plotted
         plot(ax, f_norm, seg, 'b', 'LineWidth', 2, ...
-            'DisplayName', 'Broadband Noise (1.5f_0 to 3f_0)');
+            'DisplayName', 'Broadband Noise Regions');
         first_plotted = true;
     else
         plot(ax, f_norm, seg, 'b', 'LineWidth', 2, ...
@@ -263,21 +368,53 @@ for k = 1:length(uh_orders)
     end
 end
 
-% Noise floor line
-yline(ax, noise_floor_dB, 'k--', 'LineWidth', 1.5, ...
-    'DisplayName', sprintf('Broadband Noise Floor = %.2f dB', noise_floor_dB));
+% Harmonics (red circles) — f0 always; H2+ only if exceeds harmonic threshold
+legend_added_harm = false;
+for k = 1:n_harmonics
+    if ~exceeds_harm(k), continue; end
+    if ~legend_added_harm
+        plot(ax, f_norm(harmonic_indices(k)), ...
+            20*log10(harmonic_amplitudes(k) + eps), ...
+            'ro', 'MarkerFaceColor', 'r', 'MarkerSize', 8, ...
+            'DisplayName', 'Fundamental (f_0) and Harmonics (exceeds threshold)');
+        legend_added_harm = true;
+    else
+        plot(ax, f_norm(harmonic_indices(k)), ...
+            20*log10(harmonic_amplitudes(k) + eps), ...
+            'ro', 'MarkerFaceColor', 'r', 'MarkerSize', 8, ...
+            'HandleVisibility', 'off');
+    end
+end
 
-% Harmonics (red circles)
-plot(ax, f_norm(harmonic_indices), ...
-    20*log10(harmonic_amplitudes + eps), ...
-    'ro', 'MarkerFaceColor', 'r', 'MarkerSize', 8, ...
-    'DisplayName', 'Fundamental (f_0) and Harmonics');
+% Harmonic threshold lines (H2, H3, H4) — same style as UH thresholds
+harm_thr_colors = [0.85 0.3 0;   % burnt orange for H2
+                   0.75 0.1 0;   % darker orange for H3
+                   0.60 0.0 0];  % deep red-brown for H4
+harm_labels = {'H1','H2','H3'};
+
+for k = 2:n_harmonics
+    if isnan(harmonic_threshold_dB(k)), continue; end
+    f_ctr  = harmonic_freqs(k) / drive_frequency;
+    half_w = search_range / drive_frequency;
+    x_seg  = [f_ctr - half_w, f_ctr + half_w];
+    y_seg  = [harmonic_threshold_dB(k), harmonic_threshold_dB(k)];
+
+    plot(ax, x_seg, y_seg, '--', ...
+        'Color',     harm_thr_colors(k-1,:), ...
+        'LineWidth', 1.8, ...
+        'DisplayName', sprintf('Threshold %s = %.1f dB', harm_labels{k-1}, harmonic_threshold_dB(k)));
+
+    text(ax, f_ctr, harmonic_threshold_dB(k) + 2, ...
+        sprintf('Thr %s', harm_labels{k-1}), ...
+        'Color', harm_thr_colors(k-1,:), 'FontSize', 9, ...
+        'HorizontalAlignment', 'center', 'FontWeight', 'bold');
+end
 
 % Ultraharmonics (green triangles) — only plot if target peak exceeds threshold
 legend_added_uh = false;
 for k = 1:length(uh_orders)
     if ultraharmonic_indices(k) <= 0, continue; end
-    if ~exceeds(k), continue; end   % skip if below threshold
+    if ~exceeds(k), continue; end
 
     if ~legend_added_uh
         plot(ax, f_norm(ultraharmonic_indices(k)), ...
@@ -293,17 +430,14 @@ for k = 1:length(uh_orders)
     end
 end
 
-% --- Threshold lines per UH (one magenta dashed line per UH at its threshold dB) ---
-% Draw each threshold line only over the UH search window so they don't
-% clutter the whole plot.  A short horizontal segment centred on the UH
-% target frequency with width = search_range on each side.
-uh_colors = [0.85 0 0.85;   % magenta-ish for U1.5
-             0.60 0 0.80;   % purple-ish  for U2.5
-             0.30 0 0.70];  % deep purple for U3.5
+% Threshold lines per UH
+uh_colors = [0.85 0 0.85;
+             0.60 0 0.80;
+             0.30 0 0.70];
 
 for k = 1:length(uh_orders)
-    f_ctr    = uh_orders(k);                    % in normalised units
-    half_w   = search_range / drive_frequency;  % convert Hz -> normalised
+    f_ctr    = uh_orders(k);
+    half_w   = search_range / drive_frequency;
     x_seg    = [f_ctr - half_w, f_ctr + half_w];
     y_seg    = [threshold_dB(k), threshold_dB(k)];
 
@@ -312,16 +446,16 @@ for k = 1:length(uh_orders)
         'LineWidth', 1.8, ...
         'DisplayName', sprintf('Threshold U%.1f = %.1f dB', uh_orders(k), threshold_dB(k)));
 
-    % Small annotation above the line
     text(ax, f_ctr, threshold_dB(k) + 2, ...
         sprintf('Thr U%.1f', uh_orders(k)), ...
         'Color', uh_colors(k,:), 'FontSize', 9, ...
         'HorizontalAlignment', 'center', 'FontWeight', 'bold');
 end
 
-% Harmonic labels
+% Harmonic labels — f0 always; H2+ only if exceeds threshold
 label_offset = 5;
 for k = 1:n_harmonics
+    if ~exceeds_harm(k), continue; end
     if k == 1, label = 'f_0'; else, label = sprintf('H%d', k-1); end
     text(ax, f_norm(harmonic_indices(k)), ...
         20*log10(harmonic_amplitudes(k)+eps) + label_offset, label, ...
@@ -332,7 +466,7 @@ end
 % Ultraharmonic labels — only if exceeds threshold
 for k = 1:length(uh_orders)
     if ultraharmonic_indices(k) <= 0, continue; end
-    if ~exceeds(k), continue; end   % skip if below threshold
+    if ~exceeds(k), continue; end
     text(ax, f_norm(ultraharmonic_indices(k)), ...
         20*log10(ultraharmonic_amplitudes(k)+eps) + label_offset, ...
         sprintf('U%.1f', uh_orders(k)), ...
@@ -351,5 +485,10 @@ ylim(ax, [-150 -50]);
 grid(ax, 'on');
 box(ax, 'on');
 legend(ax, 'Location', 'northeast');
+
+%% === HELPER ===
+function s = string_exceed(flag)
+    if flag, s = 'EXCEEDS'; else, s = 'within'; end
+end
 
 
