@@ -1,7 +1,7 @@
 %% Dataset 2 Analysis 
 % Capstone II - Team E(Chidna)
 % JiaJia Fu 
-% 4/3/26
+% 4/8/26
 
 clear;
 clc;
@@ -29,56 +29,7 @@ if isempty(ambient_file_idx)
     error('No ambient .pacq file found');
 end
 
-% Load ambient once — shared across all target files
-ambient_data  = extract_probe_data(probe_path, ambient_file_idx);
-a_fs          = ambient_data.fs;
-ambient_frame = ambient_data.rf_data(:, 64, 1);   % matches single-frame
-[pxx_amb, f_amb] = pwelch(ambient_frame, [], [], [], a_fs);
-amb_spec      = pxx_amb;
-amb_df        = f_amb(2) - f_amb(1);
-amb_sr        = bin_range * amb_df;
-
-% Precompute ambient UH threshold — same method as single-frame
-amb_uh_peak_dB = NaN(1, length(uh_orders));
-amb_uh_std_dB  = NaN(1, length(uh_orders));
-for k = 1:length(uh_orders)
-    f_target   = uh_orders(k) * f0;
-    idx_window = find(f_amb >= f_target - amb_sr & f_amb <= f_target + amb_sr);
-    if isempty(idx_window), continue; end
-    amb_uh_peak_dB(k) = 10*log10(max(amb_spec(idx_window)));
-    amb_uh_std_dB(k)  = std(10*log10(amb_spec(idx_window) + eps));
-end
-uh_threshold_dB = amb_uh_peak_dB + threshold_N * amb_uh_std_dB;
-
-% Precompute ambient harmonic noise floor — same method as single-frame
-harmonic_freqs = f0 * harmonics;
-amb_noise_mask = true(size(f_amb));
-for k = 1:n_harmonics
-    [~, h_idx] = min(abs(f_amb - harmonic_freqs(k)));
-    lo = max(1, h_idx - bin_range);
-    hi = min(length(f_amb), h_idx + bin_range);
-    amb_noise_mask(lo:hi) = false;
-end
-for k = 1:length(uh_orders)
-    [~, u_idx] = min(abs(f_amb - uh_orders(k)*f0));
-    lo = max(1, u_idx - bin_range);
-    hi = min(length(f_amb), u_idx + bin_range);
-    amb_noise_mask(lo:hi) = false;
-end
-amb_noise_vals_dB            = 10*log10(amb_spec(amb_noise_mask));
-amb_noise_mean_dB            = mean(amb_noise_vals_dB);
-amb_noise_std_dB             = std(amb_noise_vals_dB);
-harmonic_threshold_dB_scalar = amb_noise_mean_dB + threshold_N * amb_noise_std_dB;
-harmonic_threshold_dB        = repmat(harmonic_threshold_dB_scalar, 1, n_harmonics);
-
-% Precompute ambient BB std for safety — same method as single-frame
-bb_lo_hz = 6.5*f0 + bin_range*amb_df;
-bb_hi_hz = 7.0*f0 - bin_range*amb_df;
-bb_lo_n  = max(min(bb_lo_hz, bb_hi_hz), 1e-4) / (a_fs/2);
-bb_hi_n  = min(max(bb_lo_hz, bb_hi_hz), a_fs/2 - 1) / (a_fs/2);
-bb_hi_n  = min(bb_hi_n, 1-1e-4);
-[b_bp, a_bp]   = butter(4, [bb_lo_n, bb_hi_n], 'bandpass');
-ambient_bb_std = std(filtfilt(b_bp, a_bp, double(ambient_frame)));
+disp(['Ambient file detected: ', probe_files(ambient_file_idx).name]);
 
 %% --- PREALLOCATE RESULTS ---
 N = length(target_files);
@@ -104,114 +55,261 @@ Results(N) = struct( ...
 
 %% --- MAIN LOOP: all frames ---
 N_files = numel(target_files);
-
-Results = [];  % start empty, will append for each frame
-
+Results = [];
+ 
+% --- Load ambient data once ---
+ambient_data = extract_probe_data(probe_path, ambient_file_idx);
+a_fs     = ambient_data.fs;
+N_ambient = size(ambient_data.rf_data, 3);
+ 
+fprintf('Loaded ambient file: %s (%d frames)\n', ...
+    target_files(ambient_file_idx).name, N_ambient);
+ 
+% --- Ambient diagnostics ---
+for f = 1:N_ambient
+    frame_amb     = double(ambient_data.rf_data(:, 64, f));
+    mean_pressure = mean(frame_amb);
+    std_pressure  = std(frame_amb);
+    max_pressure  = max(frame_amb);
+    min_pressure  = min(frame_amb);
+ 
+    [pxx_a, f_vec] = pwelch(frame_amb, [], [], [], a_fs);
+    df_amb = f_vec(2) - f_vec(1);
+ 
+    bb_lo_hz = 6.5 * f0 + bin_range * df_amb;
+    bb_hi_hz = 7.0 * f0 - bin_range * df_amb;
+    bb_lo_n  = max(min(bb_lo_hz, bb_hi_hz), 1e-4) / (a_fs/2);
+    bb_hi_n  = min(max(bb_lo_hz, bb_hi_hz), a_fs/2 - 1) / (a_fs/2);
+    bb_hi_n  = min(bb_hi_n, 1-1e-4);
+    [b_bp, a_bp] = butter(4, [bb_lo_n, bb_hi_n], 'bandpass');
+    bb_std = std(filtfilt(b_bp, a_bp, frame_amb));
+ 
+    fprintf('Ambient Frame %d: Mean=%.3f Std=%.3f Max=%.3f Min=%.3f BB_std=%.3f\n', ...
+        f, mean_pressure, std_pressure, max_pressure, min_pressure, bb_std);
+end
+ 
+%% --- Per-file, per-frame loop ---
 for i = 1:N_files
     if i == ambient_file_idx
-        fprintf('Skipping ambient file: %s\n', target_files(i).name);
         continue
     end
-
+ 
     fprintf('\n[%d/%d] Processing: %s\n', i, N_files, target_files(i).name);
-
-    % Load probe data
+ 
     clean_data = extract_probe_data(probe_path, i);
-    fs_i       = clean_data.fs;
-    N_frames   = size(clean_data.rf_data, 3);
-
-    % Precompute BB filter once per file
-    bb_lo_i = max(min(bb_lo_hz, bb_hi_hz), 1e-4) / (fs_i/2);
-    bb_hi_i = min(max(bb_lo_hz, bb_hi_hz), fs_i/2 - 1) / (fs_i/2);
-    bb_hi_i = min(bb_hi_i, 1-1e-4);
-    [b_i, a_i] = butter(4, [bb_lo_i, bb_hi_i], 'bandpass');
-
+    fs_i   = clean_data.fs;
+    N_frames = size(clean_data.rf_data, 3);
+ 
+    % --- Parse concentration label from filename ---
+    % Expects filenames like PCI_1000x_01.pacq → concentration = '1000x_01'
+    raw_name = target_files(i).name;
+    conc_token = regexp(raw_name, 'PCI_(.+?)\.', 'tokens', 'once');
+    if ~isempty(conc_token)
+        concentration = conc_token{1};
+    else
+        concentration = raw_name;  % fallback
+    end
+ 
+    harmonic_freqs = f0 * harmonics;  % length = n_harmonics (3)
+ 
     for f = 1:N_frames
-        frame_i = double(clean_data.rf_data(:, 64, f));
-        [pxx_i, f_i] = pwelch(frame_i, [], [], [], fs_i);
-        df_i = f_i(2) - f_i(1);
-        search_range_i = bin_range * df_i;
-
-        % --- Harmonics ---
-        harmonic_indices_i = zeros(1, n_harmonics);
-        harmonic_amplitudes_i = zeros(1, n_harmonics);
-        for k = 1:n_harmonics
-            [~, idx] = min(abs(f_i - harmonic_freqs(k)));
-            harmonic_indices_i(k) = idx;
-            harmonic_amplitudes_i(k) = pxx_i(idx);
-        end
-        target_harm_dB_i = 10*log10(harmonic_amplitudes_i);
-
-        % --- Ultraharmonics ---
-        ultraharmonic_indices_i = zeros(1, length(uh_orders));
-        ultraharmonic_amplitudes_i = zeros(1, length(uh_orders));
+ 
+        frame_i         = double(clean_data.rf_data(:, 64, f));
+        ambient_frame_i = double(ambient_data.rf_data(:, 64, f));
+ 
+        % --- Pressure from frame index ---
+        % Frame 1 = 0.025 MPa, increments of 0.005 MPa
+        pressure_MPa = 0.020 + f * 0.005;
+ 
+        % --- PSDs ---
+        [pxx_i,   f_i]   = pwelch(frame_i,         [], [], [], fs_i);
+        [pxx_amb, f_amb]  = pwelch(ambient_frame_i, [], [], [], a_fs);
+        df_i   = f_i(2)   - f_i(1);
+        df_amb = f_amb(2)  - f_amb(1);
+        search_range_i   = bin_range * df_i;
+        search_range_amb = bin_range * df_amb;
+ 
+        % ---- Ambient thresholds ----------------------------------------
+        % Ultraharmonics
+        amb_uh_peak_dB = NaN(1, length(uh_orders));
+        amb_uh_std_dB  = NaN(1, length(uh_orders));
         for k = 1:length(uh_orders)
-            f_target = uh_orders(k) * f0;
-            idx_window = find(f_i >= f_target - search_range_i & f_i <= f_target + search_range_i);
-            if isempty(idx_window), continue; end
-            [max_val, max_idx] = max(pxx_i(idx_window));
-            ultraharmonic_indices_i(k) = idx_window(max_idx);
-            ultraharmonic_amplitudes_i(k) = max_val;
+            f_target   = uh_orders(k) * f0;
+            idx_w = find(f_amb >= f_target - search_range_amb & ...
+                         f_amb <= f_target + search_range_amb);
+            if ~isempty(idx_w)
+                amb_uh_peak_dB(k) = 10*log10(max(pxx_amb(idx_w)));
+                amb_uh_std_dB(k)  = std(10*log10(pxx_amb(idx_w) + eps));
+            end
         end
-        target_uh_dB_i = 10*log10(ultraharmonic_amplitudes_i);
-
-        % --- Threshold comparisons ---
-        exceeds_harm_i = target_harm_dB_i > harmonic_threshold_dB;
-        exceeds_uh_i   = target_uh_dB_i > uh_threshold_dB;
-
-        % --- BB safety ---
+        uh_threshold_dB = amb_uh_peak_dB + threshold_N * amb_uh_std_dB;
+ 
+        % Harmonics noise floor
+        amb_noise_mask = true(size(f_amb));
+        for k = 1:n_harmonics
+            [~, h_idx] = min(abs(f_amb - harmonic_freqs(k)));
+            lo = max(1, h_idx - bin_range);
+            hi = min(length(f_amb), h_idx + bin_range);
+            amb_noise_mask(lo:hi) = false;
+        end
+        for k = 1:length(uh_orders)
+            [~, u_idx] = min(abs(f_amb - uh_orders(k)*f0));
+            lo = max(1, u_idx - bin_range);
+            hi = min(length(f_amb), u_idx + bin_range);
+            amb_noise_mask(lo:hi) = false;
+        end
+        amb_noise_vals_dB     = 10*log10(pxx_amb(amb_noise_mask));
+        amb_noise_mean_dB     = mean(amb_noise_vals_dB);
+        amb_noise_std_dB      = std(amb_noise_vals_dB);
+        harmonic_threshold_dB = amb_noise_mean_dB + threshold_N * amb_noise_std_dB;
+        % scalar threshold — same for all harmonics (matches PCD broadband approach)
+ 
+        % ---- Broadband filter ------------------------------------------
+        bb_lo_hz = 6.5 * f0 + bin_range * df_amb;
+        bb_hi_hz = 7.0 * f0 - bin_range * df_amb;
+        bb_lo_i  = max(min(bb_lo_hz, bb_hi_hz), 1e-4) / (fs_i/2);
+        bb_hi_i  = min(max(bb_lo_hz, bb_hi_hz), fs_i/2 - 1) / (fs_i/2);
+        bb_hi_i  = min(bb_hi_i, 1-1e-4);
+        [b_i, a_i] = butter(4, [bb_lo_i, bb_hi_i], 'bandpass');
+ 
+        ambient_bb_std  = std(filtfilt(b_i, a_i, ambient_frame_i));
         target_bb_std_i = std(filtfilt(b_i, a_i, frame_i));
-        safety_1s_i = target_bb_std_i > 2 * ambient_bb_std;
-        safety_2s_i = target_bb_std_i > 3 * ambient_bb_std;
-        safety_3s_i = target_bb_std_i > 4 * ambient_bb_std;
-
-        % --- Append to Results ---
-        R = struct();
-        R.filename                 = target_files(i).name;
-        R.frame                    = f;
-        R.harmonic_amplitudes      = harmonic_amplitudes_i;
-        R.target_harm_dB           = target_harm_dB_i;
-        R.ultraharmonic_amplitudes = ultraharmonic_amplitudes_i;
-        R.target_uh_dB             = target_uh_dB_i;
-        R.harmonic_indices         = harmonic_indices_i;
-        R.ultraharmonic_indices    = ultraharmonic_indices_i;
-        R.exceeds_harm             = exceeds_harm_i;
-        R.exceeds_uh               = exceeds_uh_i;
-        R.harmonic_threshold_dB    = harmonic_threshold_dB;
-        R.uh_threshold_dB          = uh_threshold_dB;
-        R.target_bb_std            = target_bb_std_i;
-        R.ambient_bb_std           = ambient_bb_std;
-        R.safety_1s                = safety_1s_i;
-        R.safety_2s                = safety_2s_i;
-        R.safety_3s                = safety_3s_i;
-
-        Results = [Results; R];  % append per frame
-    end
-end
-
-%% --- Convert Results to CSV-safe table ---
-N = numel(Results);
-tableStruct = struct();
-fields = fieldnames(Results);
-
-for f = 1:numel(fields)
-    field = fields{f};
-    vals  = {Results.(field)};
-    for k = 1:N
-        if isnumeric(vals{k}) || islogical(vals{k})
-            vals{k} = mat2str(double(vals{k}));
-        elseif ischar(vals{k}) || isstring(vals{k})
-            vals{k} = string(vals{k});
-        else
-            vals{k} = string(vals{k});
+ 
+        % ---- Harmonics (3): H1, H2, H3 --------------------------------
+        % Find index of each harmonic in f_i
+        h_idx_vec = arrayfun(@(hf) find(abs(f_i - hf) == min(abs(f_i - hf)), 1), ...
+                             harmonic_freqs);
+        h_amp_lin = pxx_i(h_idx_vec);   % linear power at peak bin
+        h_dB      = 10*log10(h_amp_lin);
+ 
+        % ---- Ultraharmonics (3): U1, U2, U3 ---------------------------
+        uh_idx_vec = zeros(1, numel(uh_orders));
+        uh_amp_lin = zeros(1, numel(uh_orders));
+        for k = 1:numel(uh_orders)
+            f_target = uh_orders(k) * f0;
+            idx_w = find(f_i >= f_target - search_range_i & ...
+                         f_i <= f_target + search_range_i);
+            if ~isempty(idx_w)
+                [max_val, max_loc] = max(pxx_i(idx_w));
+                uh_idx_vec(k) = idx_w(max_loc);
+                uh_amp_lin(k) = max_val;
+            end
         end
+        uh_dB = 10*log10(uh_amp_lin);
+ 
+        % ---- Threshold flags -------------------------------------------
+        exceeds_harm = h_dB  > harmonic_threshold_dB;   % 1×3 logical
+        exceeds_uh   = uh_dB > uh_threshold_dB;         % 1×3 logical
+ 
+        % ---- Safety flags ----------------------------------------------
+        safety_1s = target_bb_std_i > 2 * ambient_bb_std;
+        safety_2s = target_bb_std_i > 3 * ambient_bb_std;
+        safety_3s = target_bb_std_i > 4 * ambient_bb_std;
+ 
+        % ---- Console output --------------------------------------------
+        fprintf('  Frame %d/%d | Pressure %.4f MPa\n', f, N_frames, pressure_MPa);
+        fprintf('    H_dB:  [%.2f  %.2f  %.2f]\n',  h_dB(1),  h_dB(2),  h_dB(3));
+        fprintf('    UH_dB: [%.2f  %.2f  %.2f]\n', uh_dB(1), uh_dB(2), uh_dB(3));
+        fprintf('    Exceeds harm: [%d %d %d]  uh: [%d %d %d]\n', ...
+            exceeds_harm(1), exceeds_harm(2), exceeds_harm(3), ...
+            exceeds_uh(1),   exceeds_uh(2),   exceeds_uh(3));
+        fprintf('    BB std: %.4f  Ambient: %.4f  Safety: 1s=%d 2s=%d 3s=%d\n', ...
+            target_bb_std_i, ambient_bb_std, safety_1s, safety_2s, safety_3s);
+ 
+        % ---- Store as flat struct (one scalar/string per field) --------
+        % Pre-define ALL fields with defaults so struct shape is identical
+        % every iteration — prevents vertcat field-mismatch errors.
+        R = struct( ...
+            'concentration',         '', ...
+            'filename',              '', ...
+            'frame',                 NaN, ...
+            'pressure_MPa',          NaN, ...
+            'H1_idx',                NaN, ...
+            'H2_idx',                NaN, ...
+            'H3_idx',                NaN, ...
+            'H1_dB',                 NaN, ...
+            'H2_dB',                 NaN, ...
+            'H3_dB',                 NaN, ...
+            'U1_idx',                NaN, ...
+            'U2_idx',                NaN, ...
+            'U3_idx',                NaN, ...
+            'U1_dB',                 NaN, ...
+            'U2_dB',                 NaN, ...
+            'U3_dB',                 NaN, ...
+            'target_bb_std',         NaN, ...
+            'ambient_bb_std',        NaN, ...
+            'harmonic_threshold_dB', NaN, ...
+            'U1_threshold_dB',       NaN, ...
+            'U2_threshold_dB',       NaN, ...
+            'U3_threshold_dB',       NaN, ...
+            'exceeds_H1',            false, ...
+            'exceeds_H2',            false, ...
+            'exceeds_H3',            false, ...
+            'exceeds_U1',            false, ...
+            'exceeds_U2',            false, ...
+            'exceeds_U3',            false, ...
+            'safety_1s',             false, ...
+            'safety_2s',             false, ...
+            'safety_3s',             false  ...
+        );
+ 
+        R.concentration     = concentration;
+        R.filename          = raw_name;
+        R.frame             = f;
+        R.pressure_MPa      = pressure_MPa;
+ 
+        % Harmonic indices
+        R.H1_idx            = h_idx_vec(1);
+        R.H2_idx            = h_idx_vec(2);
+        R.H3_idx            = h_idx_vec(3);
+ 
+        % Harmonic dB
+        R.H1_dB             = h_dB(1);
+        R.H2_dB             = h_dB(2);
+        R.H3_dB             = h_dB(3);
+ 
+        % Ultraharmonic indices
+        R.U1_idx            = uh_idx_vec(1);
+        R.U2_idx            = uh_idx_vec(2);
+        R.U3_idx            = uh_idx_vec(3);
+ 
+        % Ultraharmonic dB
+        R.U1_dB             = uh_dB(1);
+        R.U2_dB             = uh_dB(2);
+        R.U3_dB             = uh_dB(3);
+ 
+        % Broadband
+        R.target_bb_std     = target_bb_std_i;
+        R.ambient_bb_std    = ambient_bb_std;
+ 
+        % Threshold values used
+        R.harmonic_threshold_dB = harmonic_threshold_dB;   % scalar
+        R.U1_threshold_dB   = uh_threshold_dB(1);
+        R.U2_threshold_dB   = uh_threshold_dB(2);
+        R.U3_threshold_dB   = uh_threshold_dB(3);
+ 
+        % Threshold flags
+        R.exceeds_H1        = exceeds_harm(1);
+        R.exceeds_H2        = exceeds_harm(2);
+        R.exceeds_H3        = exceeds_harm(3);
+        R.exceeds_U1        = exceeds_uh(1);
+        R.exceeds_U2        = exceeds_uh(2);
+        R.exceeds_U3        = exceeds_uh(3);
+ 
+        % Safety flags
+        R.safety_1s         = safety_1s;
+        R.safety_2s         = safety_2s;
+        R.safety_3s         = safety_3s;
+ 
+        Results = [Results; R];
     end
-    tableStruct.(field) = vals(:);  % ensure column
 end
-
-T = struct2table(tableStruct);
-writetable(T, 'ML_ready_probe_data.csv');
-fprintf('\nCSV saved successfully with %d rows.\n', N);
+ 
+%% --- Save probe CSV ---
+T_probe = struct2table(Results);
+writetable(T_probe, 'Probe_Features.csv');
+fprintf('\nProbe CSV saved: %d rows.\n', height(T_probe));
+ 
 
 %% Functions
 
