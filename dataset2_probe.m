@@ -1,7 +1,7 @@
-l%% Dataset 2 Analysis 
+%% Dataset 2 Analysis 
 % Capstone II - Team E(Chidna)
 % JiaJia Fu 
-% 4/3/26
+% 4/8/26
 
 clear;
 clc;
@@ -68,7 +68,7 @@ fprintf('Ambient channels: %d\n',      size(ambient_data.rf_data, 2));
 
 %% Load probe and ambient data — middle channel, frame 32
 
-frame_32  = clean_data.rf_data(:, 64, 1); % highest pressure at 1? best plot 
+frame_32  = clean_data.rf_data(:, 64, 32); % highest pressure at 1? best plot 
 [pxx_32, f_32] = pwelch(frame_32, [], [], [], fs_32);
 WelchSpec = pxx_32; %just in case don't break code downstream
 pxx_db_32 = 10*log10(pxx_32);
@@ -83,7 +83,7 @@ fprintf('  Mean:          %.4f mV\n', mean(frame_32));
 fprintf('  Std deviation: %.4f mV\n', std(frame_32));
 fprintf('  Peak-to-peak:  %.4f mV\n', max(frame_32) - min(frame_32))
 
-ambient_frame = ambient_data.rf_data(:, 64, 1);  
+ambient_frame = ambient_data.rf_data(:, 64, 32);  
 [pxx_amb, f_amb] = pwelch(ambient_frame, [], [], [], a_fs);
 amb_spec = pxx_amb;  %just in case don't break code downstream
 amb_df   = f_amb(2) - f_amb(1);
