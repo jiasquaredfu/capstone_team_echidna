@@ -1,7 +1,7 @@
 %% Dataset 2 Analysis 
 % Capstone II - Team E(Chidna)
 % JiaJia Fu 
-% 4/8/26
+% 4/10/26
 
 clear;
 clc;
@@ -68,7 +68,7 @@ fprintf('Ambient channels: %d\n',      size(ambient_data.rf_data, 2));
 
 %% Load probe and ambient data — middle channel, frame 32
 
-frame_32  = clean_data.rf_data(:, 64, 32); % highest pressure at 1? best plot 
+frame_32  = clean_data.rf_data(:, 64, 1); % highest pressure at 1, best plot 
 [pxx_32, f_32] = pwelch(frame_32, [], [], [], fs_32);
 WelchSpec = pxx_32; %just in case don't break code downstream
 pxx_db_32 = 10*log10(pxx_32);
@@ -83,7 +83,7 @@ fprintf('  Mean:          %.4f mV\n', mean(frame_32));
 fprintf('  Std deviation: %.4f mV\n', std(frame_32));
 fprintf('  Peak-to-peak:  %.4f mV\n', max(frame_32) - min(frame_32))
 
-ambient_frame = ambient_data.rf_data(:, 64, 32);  
+ambient_frame = ambient_data.rf_data(:, 64, 1);  
 [pxx_amb, f_amb] = pwelch(ambient_frame, [], [], [], a_fs);
 amb_spec = pxx_amb;  %just in case don't break code downstream
 amb_df   = f_amb(2) - f_amb(1);
@@ -311,7 +311,7 @@ function s = string_exceed(cond)
     end
 end
 
-%% Test plot with all labels
+%% Plot with all labels
 
 figure; grid on; hold on;
 dark_green  = [0 0.5 0];
@@ -346,26 +346,26 @@ for k = 1:n_harmonics
     idx = harmonic_indices(k);
     if idx <= 0, continue; end
     plot(f_norm_32(idx), 10*log10(harmonic_amplitudes(k)), ...
-         'ro', 'MarkerFaceColor', 'r', 'MarkerSize', 12, 'HandleVisibility','off');
+         'ro', 'MarkerFaceColor', 'r', 'MarkerSize', 18, 'HandleVisibility','off');
     text(f_norm_32(idx), 10*log10(harmonic_amplitudes(k))+label_offset, ...
-         sprintf('H%d', harmonics(k)), 'Color','r', 'FontWeight','bold', 'FontSize',14, ...
+         sprintf('H%d', harmonics(k)), 'Color','r', 'FontWeight','bold', 'FontSize',18, ...
          'HorizontalAlignment','center');
 end
 % Add legend for harmonics
-plot(NaN, NaN, 'ro', 'MarkerFaceColor','r', 'MarkerSize',12, 'DisplayName','Harmonics');
+plot(NaN, NaN, 'ro', 'MarkerFaceColor','r', 'MarkerSize',18, 'DisplayName','Harmonics');
 
 % --- Ultraharmonics (green triangles) with labels ---
 for k = 1:length(uh_orders)
     idx = ultraharmonic_indices(k);
     if idx <= 0, continue; end
     plot(f_norm_32(idx), 10*log10(ultraharmonic_amplitudes(k)), ...
-         '^', 'Color', dark_green, 'MarkerFaceColor', dark_green, 'MarkerSize', 12, 'HandleVisibility','off');
+         '^', 'Color', dark_green, 'MarkerFaceColor', dark_green, 'MarkerSize', 18, 'HandleVisibility','off');
     text(f_norm_32(idx), 10*log10(ultraharmonic_amplitudes(k))+label_offset, ...
-         sprintf('U%.1f', uh_orders(k)), 'Color', dark_green, 'FontWeight','bold', 'FontSize',14, ...
+         sprintf('U%.1f', uh_orders(k)), 'Color', dark_green, 'FontWeight','bold', 'FontSize',18, ...
          'HorizontalAlignment','center');
 end
 % Add legend for ultraharmonics
-plot(NaN, NaN, '^', 'Color', dark_green, 'MarkerFaceColor', dark_green, 'MarkerSize',12, 'DisplayName','Ultraharmonics');
+plot(NaN, NaN, '^', 'Color', dark_green, 'MarkerFaceColor', dark_green, 'MarkerSize',18, 'DisplayName','Ultraharmonics');
 
 % --- Harmonic threshold lines (H2, H3, H4) ---
 harm_thr_colors = [0.85 0.3 0; 0.75 0.1 0; 0.60 0.0 0];  % colors
@@ -377,10 +377,10 @@ for k = 2:n_harmonics
     half_w = search_range/f0 * line_frac;
     x_seg = [f_ctr-half_w, f_ctr+half_w];
     y_seg = [harmonic_threshold_dB(k), harmonic_threshold_dB(k)];
-    plot(x_seg, y_seg, '--', 'Color', harm_thr_colors(min(k-1,3),:), 'LineWidth',2.2, ...
+    plot(x_seg, y_seg, '--', 'Color', harm_thr_colors(min(k-1,3),:), 'LineWidth',2.5, ...
          'DisplayName', sprintf('Threshold %s = %.1f dB', harm_labels{k}, harmonic_threshold_dB(k)));
     text(f_ctr, harmonic_threshold_dB(k)+2, sprintf('Thr %s', harm_labels{k}), ...
-         'Color', harm_thr_colors(min(k-1,3),:), 'FontSize',12, 'HorizontalAlignment','center','FontWeight','bold');
+         'Color', harm_thr_colors(min(k-1,3),:), 'FontSize',18, 'HorizontalAlignment','center','FontWeight','bold');
 end
 
 % --- Ultraharmonic threshold lines ---
@@ -390,301 +390,23 @@ for k = 1:length(uh_orders)
     half_w = search_range/f0* line_frac;
     x_seg = [f_ctr-half_w, f_ctr+half_w];
     y_seg = [threshold_dB(k), threshold_dB(k)];
-    plot(x_seg, y_seg, '--', 'Color', uh_colors(min(k,3),:), 'LineWidth',2.2, ...
+    plot(x_seg, y_seg, '--', 'Color', uh_colors(min(k,3),:), 'LineWidth',2.5, ...
          'DisplayName', sprintf('Threshold U%.1f = %.1f dB', uh_orders(k), threshold_dB(k)));
     text(f_ctr, threshold_dB(k)+2, sprintf('Thr U%.1f', uh_orders(k)), ...
-         'Color', uh_colors(min(k,3),:), 'FontSize',12, 'HorizontalAlignment','center','FontWeight','bold');
+         'Color', uh_colors(min(k,3),:), 'FontSize',18, 'HorizontalAlignment','center','FontWeight','bold');
 end
 
 % --- Formatting ---
 title('Normalized Cavitation Spectrum — Harmonics, Ultraharmonics, Broadband Noise, and Thresholds', ...
-      'FontSize',18,'FontWeight','bold');
-xlabel('Normalized Frequency  (f / f_0)','FontSize',18,'FontWeight','bold');
-ylabel('Acoustic Power Spectral Density (dB)','FontSize',18,'FontWeight','bold');
+      'FontSize',24,'FontWeight','bold');
+xlabel('Normalized Frequency  (f / f_0)','FontSize',24,'FontWeight','bold');
+ylabel('Acoustic Power Spectral Density (dB)','FontSize',24,'FontWeight','bold');
 ylim([-65 -40]); xlim([5 10]);
 grid on; box on;
-legend('Location','northeast','FontSize',18);
-
-
-%% ORIGINAL CODE 
-
-
-%% Reproduce original middle channel frame 1 example check
-
-clean_data = extract_probe_data(probe_path, 1);
-frame_1 = clean_data.rf_data(:, 64, 1);
-[pxx, f] = pwelch(frame_1, [], [], [], clean_data.fs);
-pxx_db   = 10*log10(pxx);
-
-f0 = 0.5e6;
-
-figure;
-plot(f/f0, pxx_db);
-title('Reproduce of original good plot');
-ylim([-65 -40]); xlim([5 10]);
+legend('Location','northeast','FontSize',24);
 
 
 
-
-f_norm   = f / f0;
-[thr1, thr2, thr3] = compute_pcd_threshold(pcd_root, f0);
-fprintf('Using thresholds: k1=%.2f, k2=%.2f, k3=%.2f\n', thr1, thr2, thr3);
-
-
-% Compute thresholds from ambient PCD files
-pcd_root = ['/Users/jiasquared/Desktop/CODING/capstone_team_echidna' ...
-    '/1_and_2_2026-01-16_single_tube_sweep/pcd/ambient'];
-
-[thr1, thr2, thr3] = compute_pcd_threshold(pcd_root, f0);
-fprintf('Thresholds — k1: %.2f dB | k2: %.2f dB | k3: %.2f dB\n', thr1, thr2, thr3);
-
-% Extract features from this frame
-feat_ex = get_features(f, pxx, f0);
-
-% Unpack harmonics
-harmonics = 6:12;
-hf = zeros(1, length(harmonics));
-hv = zeros(1, length(harmonics));
-for i = 1:length(harmonics)
-    hf(i) = feat_ex.(sprintf('H%d_freq', harmonics(i)));
-    hv(i) = feat_ex.(sprintf('H%d_db',   harmonics(i)));
-end
-hf_norm = hf / f0;
-
-% Unpack ultraharmonics
-ultraharmonics = 6.5:1:12.5;
-uf = zeros(1, length(ultraharmonics));
-uv = zeros(1, length(ultraharmonics));
-for i = 1:length(ultraharmonics)
-    u_int = ultraharmonics(i) * 10;
-    uf(i) = feat_ex.(sprintf('U%d_freq', u_int));
-    uv(i) = feat_ex.(sprintf('U%d_db',   u_int));
-end
-uf_norm = uf / f0;
-
-% Reconstruct noise mask for plotting
-all_peak_freqs = [hf(:); uf(:)];
-noise_mask = (f >= 9*f0) & (f <= 10.5*f0);
-for k = 1:length(all_peak_freqs)
-    noise_mask(abs(f - all_peak_freqs(k)) <= 0.08e6) = false;
-end
-noise_psd_db = pxx_db(noise_mask);
-current_bb   = feat_ex.broadband_noise_db;
-
-% Safety flags
-isUnsafe_k1 = current_bb >= thr1;
-isUnsafe_k2 = current_bb >= thr2;
-isUnsafe_k3 = current_bb >= thr3;
-
-% Plot
-figure; grid on; hold on;
-
-% Full spectrum
-h_full = plot(f_norm, pxx_db, 'Color',[0.5 0.5 0.5], 'LineWidth',1.5, ...
-              'DisplayName','Full PSD');
-
-% Broadband noise region
-pxx_noise_plot = nan(size(pxx_db));
-pxx_noise_plot(noise_mask) = pxx_db(noise_mask);
-h_noise = plot(f_norm, pxx_noise_plot, 'b', 'LineWidth',2, ...
-               'DisplayName','Broadband Region');
-
-% Baseline
-baseline = median(noise_psd_db);
-h_base   = yline(baseline, '--', 'Color',[0 0 0], 'LineWidth',2, ...
-                 'DisplayName','Baseline');
-
-% Threshold lines
-h_thr1 = yline(thr1, '--r', 'LineWidth',2, 'DisplayName','k=1 threshold');
-h_thr2 = yline(thr2, '--m', 'LineWidth',2, 'DisplayName','k=2 threshold');
-h_thr3 = yline(thr3, '--k', 'LineWidth',2, 'DisplayName','k=3 threshold');
-
-% Harmonics
-h_harm = plot(hf_norm, hv, 'ro', 'MarkerFaceColor','r', ...
-              'MarkerSize',8, 'DisplayName','Harmonics');
-for i = 1:length(hf_norm)
-    text(hf_norm(i), hv(i)+1, sprintf('H%d', harmonics(i)), ...
-         'HorizontalAlignment','center', 'FontWeight','bold');
-end
-
-% Ultraharmonics
-h_ultra = plot(uf_norm, uv, '^', 'Color',[0 0.5 0], ...
-               'MarkerFaceColor',[0 0.5 0], 'MarkerSize',8, ...
-               'DisplayName','Ultraharmonics');
-for i = 1:length(uf_norm)
-    text(uf_norm(i), uv(i)+1, sprintf('U%.1f', ultraharmonics(i)), ...
-         'HorizontalAlignment','center', 'FontWeight','bold');
-end
-
-% Annotations
-text(6, -42, sprintf('BB = %.2f dB', current_bb), ...
-     'FontSize',14, 'FontWeight','bold')
-text(6, -44, sprintf('k1: %s | k2: %s | k3: %s', ...
-     tf(isUnsafe_k1), tf(isUnsafe_k2), tf(isUnsafe_k3)), ...
-     'FontSize',14, 'FontWeight','bold')
-
-% Labels
-xlabel('Normalized Frequency (f/f_0)', 'FontSize',20, 'FontWeight','bold')
-ylabel('Magnitude (dB)',               'FontSize',20, 'FontWeight','bold')
-title('Probe Data Frequency Domain - Middle Channel Frame 1', 'FontSize',20)
-xlim([5 13]); ylim([-65 -40]);
-ax = gca;
-ax.FontSize = 14;
-
-legend([h_full h_noise h_base h_harm h_ultra h_thr1 h_thr2 h_thr3], ...
-       {'Full PSD','Broadband Region','Baseline', ...
-        'Harmonics','Ultraharmonics','k=1','k=2','k=3'}, ...
-       'FontSize',14, 'Location','best')
-hold off
-
-
-%% Original Plot for middle channel frame 1 example
-figure;
-grid on
-hold on
-
-f_norm = f / f0;
-
-% ---- Full Spectrum ----
-h_full = plot(f_norm, pxx_db, 'Color',[0.5, 0.5, 0.5], 'LineWidth', 1.5, ...
-              'DisplayName','Full PSD');
-
-% ---- Get all features from unified function ----
-feat_ex = get_features(f, pxx, f0);
-
-% Unpack harmonics
-harmonics = 6:12;
-hf = zeros(1, length(harmonics));
-hv = zeros(1, length(harmonics));
-for i = 1:length(harmonics)
-    hf(i) = feat_ex.(sprintf('H%d_freq', harmonics(i)));
-    hv(i) = feat_ex.(sprintf('H%d_db',   harmonics(i)));
-end
-hf_norm = hf / f0;
-
-% Unpack ultraharmonics
-ultraharmonics = 6.5:1:12.5;
-uf = zeros(1, length(ultraharmonics));
-uv = zeros(1, length(ultraharmonics));
-for i = 1:length(ultraharmonics)
-    u_int = ultraharmonics(i) * 10;
-    uf(i) = feat_ex.(sprintf('U%d_freq', u_int));
-    uv(i) = feat_ex.(sprintf('U%d_db',   u_int));
-end
-uf_norm = uf / f0;
-
-% Reconstruct noise mask for plotting
-all_peak_freqs = [hf(:); uf(:)];
-noise_mask = (f >= 9*f0) & (f <= 10.5*f0);
-for k = 1:length(all_peak_freqs)
-    noise_mask(abs(f - all_peak_freqs(k)) <= 0.08e6) = false;
-end
-noise_psd_db = pxx_db(noise_mask);
-
-% ---- Broadband Noise Mask ----
-pxx_noise_db = pxx_db;
-pxx_noise_db(~noise_mask) = NaN;
-h_noise = plot(f_norm, pxx_noise_db, 'b', 'LineWidth', 2, ...
-               'DisplayName','Broadband Region');
-
-% ---- Baseline ----
-baseline     = median(noise_psd_db);
-h_base       = yline(baseline, '--', 'Color',[0,0,0], 'LineWidth', 2, ...
-                     'DisplayName','Baseline');
-current_bb   = baseline;
-
-isUnsafe_k1 = current_bb >= thr1;
-isUnsafe_k2 = current_bb >= thr2;
-isUnsafe_k3 = current_bb >= thr3;
-
-% ---- Threshold Lines ----
-h_thr1 = yline(thr1, '--r', 'LineWidth', 2, 'DisplayName','k=1 threshold');
-h_thr2 = yline(thr2, '--m', 'LineWidth', 2, 'DisplayName','k=2 threshold');
-h_thr3 = yline(thr3, '--k', 'LineWidth', 2, 'DisplayName','k=3 threshold');
-
-% ---- Harmonics ----
-h_harm = plot(hf_norm, hv, 'ro', 'MarkerFaceColor','r', ...
-              'MarkerSize',8, 'DisplayName','Harmonics');
-for i = 1:length(hf_norm)
-    text(hf_norm(i), hv(i)+1, sprintf('H%d', harmonics(i)), ...
-         'HorizontalAlignment','center', 'FontWeight','bold');
-end
-
-% ---- Ultraharmonics ----
-h_ultra = plot(uf_norm, uv, '^', 'Color',[0 0.5 0], ...
-               'MarkerFaceColor',[0 0.5 0], 'MarkerSize',8, ...
-               'DisplayName','Ultraharmonics');
-for i = 1:length(uf_norm)
-    text(uf_norm(i), uv(i)+1, sprintf('U%.1f', ultraharmonics(i)), ...
-         'HorizontalAlignment','center', 'FontWeight','bold');
-end
-
-% ---- Labels ----
-xlabel('Normalized Frequency (f/f_0)', 'FontSize',20, 'FontWeight','bold')
-ylabel('Magnitude (dB)',               'FontSize',20, 'FontWeight','bold')
-title('Probe Data Frequency Domain - Middle Channel Frame 1', 'FontSize',20)
-xlim([5 13])
-ylim([-65 -40])
-ax = gca;
-ax.FontSize = 14;
-
-text(6, -42, sprintf('BB = %.2f dB', current_bb), 'FontSize',14,'FontWeight','bold')
-text(6, -44, sprintf('k1: %s | k2: %s | k3: %s', ...
-    tf(isUnsafe_k1), tf(isUnsafe_k2), tf(isUnsafe_k3)), ...
-    'FontSize',14,'FontWeight','bold')
-
-% ---- Legend ----
-legend([h_full h_noise h_base h_harm h_ultra h_thr1 h_thr2 h_thr3], ...
-       {'Full PSD','Broadband Region','Baseline', ...
-        'Harmonics','Ultraharmonics','k=1','k=2','k=3'}, ...
-       'FontSize',14, 'Location','best')
-hold off
-
-%% Extract features for all datafiles — middle channel only
-
-data_files = dir(fullfile(probe_path, '*.pacq*'));
-
-% Preallocation
-temp              = extract_probe_data(probe_path, 1);
-N_frames_per_file = size(temp.rf_data, 3);
-total_rows        = length(data_files) * N_frames_per_file;
-
-dummy_f    = linspace(0, 10e6, 1000)';
-dummy_pxx  = ones(size(dummy_f));
-dummy_feat = get_features(dummy_f, dummy_pxx, f0);
-dummy_feat.filename = 'dummy.pacq';
-dummy_feat.frame    = 0;
-
-all_features(total_rows, 1) = dummy_feat;
-row_idx = 1;
-
-for i = 1:length(data_files)
-    clean_data = extract_probe_data(probe_path, i);
-    N_frames   = size(clean_data.rf_data, 3);
-
-    for frame_idx = 1:N_frames
-        frame        = clean_data.rf_data(:, 64, frame_idx);
-        [pxx_i, f_i] = pwelch(frame, [], [], [], clean_data.fs);
-
-        feat          = get_features(f_i, pxx_i, f0);
-        feat.filename = data_files(i).name;
-        feat.frame    = frame_idx;
-
-        all_features(row_idx) = feat;
-        row_idx = row_idx + 1;
-    end
-end
-
-all_features   = all_features(1:row_idx-1);
-features_table = struct2table(all_features);
-
-% Rename U65 -> U6.5, U75 -> U7.5 etc. in CSV column headers only
-old_names = features_table.Properties.VariableNames;
-new_names = regexprep(old_names, 'U(\d)(\d)_', 'U$1.$2_');
-features_table.Properties.VariableNames = new_names;
-
-writetable(features_table, 'probe_data_all_frames.csv');
-disp('Feature extraction complete for all frames!');
 
 %% Functions
 
@@ -814,4 +536,3 @@ function [thr1, thr2, thr3] = compute_pcd_threshold(ambient_folder, f0)
         fprintf('Thresholds — k1: %.2f | k2: %.2f | k3: %.2f\n', thr1, thr2, thr3);
     end
 end
-
